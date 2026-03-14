@@ -173,6 +173,83 @@ class RelativeAssociation(TimestampedModel):
         super().save(*args, **kwargs)
 
 
+class AlphaMetric(models.Model):
+    sample = models.ForeignKey(Sample, on_delete=models.CASCADE, related_name='alpha_metrics')
+    metric_type = models.CharField(max_length=100)
+    value = models.FloatField()
+    unit = models.CharField(max_length=50, blank=True)
+    notes = models.TextField(blank=True)
+    import_batch = models.ForeignKey(
+        ImportBatch,
+        on_delete=models.SET_NULL,
+        related_name='alpha_metrics',
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        ordering = ['sample', 'metric_type']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['sample', 'metric_type'],
+                name='alpha_metric_unique_sample_metric_type',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.sample} | {self.metric_type}'
+
+
+class BetaMetric(models.Model):
+    sample_a = models.ForeignKey(
+        Sample,
+        on_delete=models.CASCADE,
+        related_name='beta_metrics_as_first',
+    )
+    sample_b = models.ForeignKey(
+        Sample,
+        on_delete=models.CASCADE,
+        related_name='beta_metrics_as_second',
+    )
+    metric_type = models.CharField(max_length=100)
+    value = models.FloatField()
+    unit = models.CharField(max_length=50, blank=True)
+    notes = models.TextField(blank=True)
+    import_batch = models.ForeignKey(
+        ImportBatch,
+        on_delete=models.SET_NULL,
+        related_name='beta_metrics',
+        blank=True,
+        null=True,
+    )
+
+    class Meta:
+        ordering = ['sample_a', 'sample_b', 'metric_type']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['sample_a', 'sample_b', 'metric_type'],
+                name='beta_metric_unique_sample_pair_metric_type',
+            ),
+            models.CheckConstraint(
+                condition=Q(sample_a__lt=F('sample_b')),
+                name='beta_metric_canonical_sample_order',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.sample_a} | {self.sample_b} ({self.metric_type})'
+
+    def clean(self):
+        super().clean()
+        if self.sample_a_id and self.sample_b_id and self.sample_a_id == self.sample_b_id:
+            raise ValidationError('BetaMetric cannot reference the same sample twice.')
+
+    def save(self, *args, **kwargs):
+        if self.sample_a_id and self.sample_b_id and self.sample_a_id > self.sample_b_id:
+            self.sample_a_id, self.sample_b_id = self.sample_b_id, self.sample_a_id
+        super().save(*args, **kwargs)
+
+
 class CoreMetadata(models.Model):
     sample = models.OneToOneField(
         Sample,

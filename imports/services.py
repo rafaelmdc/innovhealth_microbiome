@@ -6,6 +6,8 @@ from io import StringIO
 from django.db import transaction
 
 from database.models import (
+    AlphaMetric,
+    BetaMetric,
     CoreMetadata,
     ImportBatch,
     MetadataValue,
@@ -40,6 +42,8 @@ SUPPORTED_IMPORT_TYPES = (
     'metadata_variable',
     'metadata_value',
     'relative_association',
+    'alpha_metric',
+    'beta_metric',
 )
 
 BOOLEAN_TRUE_VALUES = {'1', 'true', 'yes', 'on'}
@@ -773,6 +777,167 @@ def _build_relative_association_preview(*, file_name, fieldnames, rows, batch_na
     )
 
 
+def _build_alpha_metric_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    required_columns = ('study_source_doi', 'sample_label', 'metric_type', 'value')
+    missing_columns = [column for column in required_columns if column not in fieldnames]
+    if missing_columns:
+        return _missing_columns_preview(
+            batch_name=batch_name,
+            import_type=import_type,
+            file_name=file_name,
+            required_columns=required_columns,
+            missing_columns=missing_columns,
+        )
+
+    existing_keys = set(
+        AlphaMetric.objects.filter(sample__study__source_doi__isnull=False).values_list(
+            'sample__study__source_doi',
+            'sample__label',
+            'metric_type',
+        )
+    )
+    seen_keys = set()
+    valid_rows = []
+    errors = []
+    duplicates = []
+
+    for row_number, raw_row in enumerate(rows, start=2):
+        row = _cleaned_row(raw_row)
+        if not row['study_source_doi'] or not row['sample_label'] or not row['metric_type']:
+            errors.append({'row_number': row_number, 'message': 'study_source_doi, sample_label, and metric_type are required.'})
+            continue
+
+        sample = _resolve_sample(row['study_source_doi'], row['sample_label'])
+        if not sample:
+            errors.append({'row_number': row_number, 'message': 'study_source_doi and sample_label do not resolve to an existing Sample.'})
+            continue
+
+        value, value_error = _parse_float(row.get('value', ''), 'value')
+        if value_error:
+            errors.append({'row_number': row_number, 'message': value_error})
+            continue
+
+        duplicate_key = (row['study_source_doi'], row['sample_label'], row['metric_type'])
+        if duplicate_key in seen_keys:
+            duplicates.append({'row_number': row_number, 'message': 'Duplicate alpha metric row in uploaded file.'})
+            continue
+        if duplicate_key in existing_keys:
+            duplicates.append({'row_number': row_number, 'message': 'AlphaMetric already exists for this sample and metric type.'})
+            continue
+        seen_keys.add(duplicate_key)
+
+        valid_rows.append(
+            {
+                'row_number': row_number,
+                'sample_id': sample.pk,
+                'study_source_doi': row['study_source_doi'],
+                'sample_label': row['sample_label'],
+                'metric_type': row['metric_type'],
+                'value': value,
+                'unit': row.get('unit', ''),
+                'notes': row.get('notes', ''),
+            }
+        )
+
+    return _build_preview_response(
+        batch_name=batch_name,
+        import_type=import_type,
+        file_name=file_name,
+        required_columns=required_columns,
+        valid_rows=valid_rows,
+        errors=errors,
+        duplicates=duplicates,
+    )
+
+
+def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    required_columns = ('study_source_doi', 'sample_1_label', 'sample_2_label', 'metric_type', 'value')
+    missing_columns = [column for column in required_columns if column not in fieldnames]
+    if missing_columns:
+        return _missing_columns_preview(
+            batch_name=batch_name,
+            import_type=import_type,
+            file_name=file_name,
+            required_columns=required_columns,
+            missing_columns=missing_columns,
+        )
+
+    existing_keys = set(
+        BetaMetric.objects.filter(sample_a__study__source_doi__isnull=False).values_list(
+            'sample_a__study__source_doi',
+            'sample_a__label',
+            'sample_b__label',
+            'metric_type',
+        )
+    )
+    seen_keys = set()
+    valid_rows = []
+    errors = []
+    duplicates = []
+
+    for row_number, raw_row in enumerate(rows, start=2):
+        row = _cleaned_row(raw_row)
+        if not row['study_source_doi'] or not row['sample_1_label'] or not row['sample_2_label'] or not row['metric_type']:
+            errors.append({'row_number': row_number, 'message': 'study_source_doi, sample_1_label, sample_2_label, and metric_type are required.'})
+            continue
+
+        sample_1 = _resolve_sample(row['study_source_doi'], row['sample_1_label'])
+        sample_2 = _resolve_sample(row['study_source_doi'], row['sample_2_label'])
+        if not sample_1 or not sample_2:
+            errors.append({'row_number': row_number, 'message': 'Both study/sample lookups must resolve to existing Sample rows.'})
+            continue
+        if sample_1.pk == sample_2.pk:
+            errors.append({'row_number': row_number, 'message': 'BetaMetric self-pairs are not allowed.'})
+            continue
+
+        value, value_error = _parse_float(row.get('value', ''), 'value')
+        if value_error:
+            errors.append({'row_number': row_number, 'message': value_error})
+            continue
+
+        if sample_1.pk > sample_2.pk:
+            sample_1, sample_2 = sample_2, sample_1
+
+        duplicate_key = (
+            row['study_source_doi'],
+            sample_1.label,
+            sample_2.label,
+            row['metric_type'],
+        )
+        if duplicate_key in seen_keys:
+            duplicates.append({'row_number': row_number, 'message': 'Duplicate beta metric row in uploaded file.'})
+            continue
+        if duplicate_key in existing_keys:
+            duplicates.append({'row_number': row_number, 'message': 'BetaMetric already exists for this canonical sample pair and metric type.'})
+            continue
+        seen_keys.add(duplicate_key)
+
+        valid_rows.append(
+            {
+                'row_number': row_number,
+                'sample_a_id': sample_1.pk,
+                'sample_b_id': sample_2.pk,
+                'study_source_doi': row['study_source_doi'],
+                'sample_1_label': sample_1.label,
+                'sample_2_label': sample_2.label,
+                'metric_type': row['metric_type'],
+                'value': value,
+                'unit': row.get('unit', ''),
+                'notes': row.get('notes', ''),
+            }
+        )
+
+    return _build_preview_response(
+        batch_name=batch_name,
+        import_type=import_type,
+        file_name=file_name,
+        required_columns=required_columns,
+        valid_rows=valid_rows,
+        errors=errors,
+        duplicates=duplicates,
+    )
+
+
 def _run_organism_import(valid_rows, batch):
     created_organisms = []
     taxonomy_to_row = {row['ncbi_taxonomy_id']: row for row in valid_rows}
@@ -901,6 +1066,33 @@ def _run_relative_association_import(valid_rows, batch):
     return len(valid_rows)
 
 
+def _run_alpha_metric_import(valid_rows, batch):
+    for row in valid_rows:
+        AlphaMetric.objects.create(
+            sample_id=row['sample_id'],
+            metric_type=row['metric_type'],
+            value=row['value'],
+            unit=row['unit'],
+            notes=row['notes'],
+            import_batch=batch,
+        )
+    return len(valid_rows)
+
+
+def _run_beta_metric_import(valid_rows, batch):
+    for row in valid_rows:
+        BetaMetric.objects.create(
+            sample_a_id=row['sample_a_id'],
+            sample_b_id=row['sample_b_id'],
+            metric_type=row['metric_type'],
+            value=row['value'],
+            unit=row['unit'],
+            notes=row['notes'],
+            import_batch=batch,
+        )
+    return len(valid_rows)
+
+
 PREVIEW_BUILDERS = {
     'organism': _build_organism_preview,
     'study': _build_study_preview,
@@ -909,6 +1101,8 @@ PREVIEW_BUILDERS = {
     'metadata_variable': _build_metadata_variable_preview,
     'metadata_value': _build_metadata_value_preview,
     'relative_association': _build_relative_association_preview,
+    'alpha_metric': _build_alpha_metric_preview,
+    'beta_metric': _build_beta_metric_preview,
 }
 
 # These registries are the extension points for new import types: add both a
@@ -921,4 +1115,6 @@ IMPORT_RUNNERS = {
     'metadata_variable': _run_metadata_variable_import,
     'metadata_value': _run_metadata_value_import,
     'relative_association': _run_relative_association_import,
+    'alpha_metric': _run_alpha_metric_import,
+    'beta_metric': _run_beta_metric_import,
 }

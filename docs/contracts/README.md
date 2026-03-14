@@ -30,8 +30,16 @@ Design rules:
 
 Implementation status:
 
-- `Organism` import is implemented in code
-- the remaining contracts are documented but not yet implemented
+- imports for the implemented schema models are supported in code:
+- `Organism`
+- `Study`
+- `Sample`
+- `CoreMetadata`
+- `MetadataVariable`
+- `MetadataValue`
+- `RelativeAssociation`
+- `AlphaMetric`
+- `BetaMetric`
 
 Related docs:
 

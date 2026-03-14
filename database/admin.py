@@ -1,6 +1,8 @@
 from django.contrib import admin
 
 from .models import (
+    AlphaMetric,
+    BetaMetric,
     CoreMetadata,
     ImportBatch,
     MetadataValue,
@@ -35,6 +37,13 @@ class MetadataValueInline(admin.TabularInline):
     fields = ('variable', 'value_float', 'value_int', 'value_text', 'value_bool', 'unit', 'import_batch')
 
 
+class AlphaMetricInline(admin.TabularInline):
+    model = AlphaMetric
+    extra = 0
+    autocomplete_fields = ('import_batch',)
+    fields = ('metric_type', 'value', 'unit', 'import_batch')
+
+
 class RelativeAssociationInline(admin.TabularInline):
     model = RelativeAssociation
     extra = 0
@@ -65,7 +74,7 @@ class SampleAdmin(admin.ModelAdmin):
     search_fields = ('label', 'study__title', 'cohort', 'site', 'method')
     autocomplete_fields = ('study',)
     list_select_related = ('study',)
-    inlines = (CoreMetadataInline, MetadataValueInline, RelativeAssociationInline)
+    inlines = (CoreMetadataInline, MetadataValueInline, AlphaMetricInline, RelativeAssociationInline)
 
 
 @admin.register(Organism)
@@ -99,6 +108,31 @@ class RelativeAssociationAdmin(admin.ModelAdmin):
     )
     list_select_related = ('sample__study', 'organism_1', 'organism_2', 'import_batch')
     autocomplete_fields = ('sample', 'organism_1', 'organism_2', 'import_batch')
+
+
+@admin.register(AlphaMetric)
+class AlphaMetricAdmin(admin.ModelAdmin):
+    list_display = ('sample', 'metric_type', 'value', 'unit', 'import_batch')
+    list_filter = ('metric_type', 'sample__study', 'import_batch')
+    search_fields = ('sample__label', 'sample__study__title', 'metric_type', 'notes')
+    list_select_related = ('sample__study', 'import_batch')
+    autocomplete_fields = ('sample', 'import_batch')
+
+
+@admin.register(BetaMetric)
+class BetaMetricAdmin(admin.ModelAdmin):
+    list_display = ('sample_a', 'sample_b', 'metric_type', 'value', 'unit', 'import_batch')
+    list_filter = ('metric_type', 'sample_a__study', 'import_batch')
+    search_fields = (
+        'sample_a__label',
+        'sample_a__study__title',
+        'sample_b__label',
+        'sample_b__study__title',
+        'metric_type',
+        'notes',
+    )
+    list_select_related = ('sample_a__study', 'sample_b__study', 'import_batch')
+    autocomplete_fields = ('sample_a', 'sample_b', 'import_batch')
 
 
 @admin.register(MetadataVariable)

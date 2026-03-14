@@ -3,7 +3,7 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import MetadataValue, MetadataVariable, Organism, RelativeAssociation, Sample, Study
+from .models import AlphaMetric, BetaMetric, MetadataValue, MetadataVariable, Organism, RelativeAssociation, Sample, Study
 
 
 class StudyModelTests(TestCase):
@@ -96,6 +96,45 @@ class MetadataValueModelTests(TestCase):
 
         with self.assertRaises(ValidationError):
             metadata_value.full_clean()
+
+
+class AlphaMetricModelTests(TestCase):
+    def test_metric_type_must_be_unique_per_sample(self):
+        study = Study.objects.create(title='Study A')
+        sample = Sample.objects.create(study=study, label='Cohort 1')
+        AlphaMetric.objects.create(sample=sample, metric_type='shannon', value=3.2)
+
+        with self.assertRaises(IntegrityError):
+            AlphaMetric.objects.create(sample=sample, metric_type='shannon', value=4.1)
+
+
+class BetaMetricModelTests(TestCase):
+    def setUp(self):
+        self.study = Study.objects.create(title='Study A')
+        self.sample_a = Sample.objects.create(study=self.study, label='Cohort 1')
+        self.sample_b = Sample.objects.create(study=self.study, label='Cohort 2')
+
+    def test_clean_rejects_self_pairs(self):
+        metric = BetaMetric(
+            sample_a=self.sample_a,
+            sample_b=self.sample_a,
+            metric_type='bray_curtis',
+            value=0.3,
+        )
+
+        with self.assertRaises(ValidationError):
+            metric.full_clean()
+
+    def test_save_enforces_canonical_order(self):
+        metric = BetaMetric.objects.create(
+            sample_a=self.sample_b,
+            sample_b=self.sample_a,
+            metric_type='bray_curtis',
+            value=0.3,
+        )
+
+        self.assertEqual(metric.sample_a, self.sample_a)
+        self.assertEqual(metric.sample_b, self.sample_b)
 
 
 class BrowserViewTests(TestCase):

@@ -4,8 +4,6 @@
 
 Import within-sample diversity metrics into `AlphaMetric`.
 
-This is an optional future contract because `AlphaMetric` is not yet implemented in the schema.
-
 ## Required columns
 
 - `study_source_doi`
@@ -41,4 +39,4 @@ study_source_doi,sample_label,metric_type,value,unit,notes
 
 ## Notes
 
-- this contract is documented now for planning consistency, but code should wait until the model exists
+- imports are create-only and duplicate rows are skipped during preview/import

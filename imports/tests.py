@@ -1,6 +1,8 @@
 from django.test import TestCase
 
 from database.models import (
+    AlphaMetric,
+    BetaMetric,
     CoreMetadata,
     ImportBatch,
     MetadataValue,
@@ -161,3 +163,59 @@ class ImportServiceTests(TestCase):
                 scientific_name='Faecalibacterium prausnitzii',
             ).exists()
         )
+
+    def test_alpha_metric_import_sets_import_batch(self):
+        preview = build_preview(
+            file_name='alpha_metrics.csv',
+            content=(
+                'study_source_doi,sample_label,metric_type,value,unit\n'
+                '10.1000/example,Cohort A,shannon,3.82,\n'
+            ),
+            import_type='alpha_metric',
+            batch_name='Alpha metric batch',
+        ).to_dict()
+
+        batch = run_import(preview)
+        metric = AlphaMetric.objects.get(sample=self.sample, metric_type='shannon')
+
+        self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
+        self.assertEqual(metric.import_batch, batch)
+        self.assertEqual(metric.value, 3.82)
+
+    def test_beta_metric_preview_canonicalizes_reverse_pairs(self):
+        sample_b = Sample.objects.create(study=self.study, label='Cohort B')
+
+        preview = build_preview(
+            file_name='beta_metrics.csv',
+            content=(
+                'study_source_doi,sample_1_label,sample_2_label,metric_type,value,unit\n'
+                f'10.1000/example,{sample_b.label},{self.sample.label},bray_curtis,0.37,\n'
+            ),
+            import_type='beta_metric',
+            batch_name='Beta metric batch',
+        )
+
+        self.assertEqual(len(preview.valid_rows), 1)
+        row = preview.valid_rows[0]
+        self.assertEqual(row['sample_a_id'], self.sample.pk)
+        self.assertEqual(row['sample_b_id'], sample_b.pk)
+
+    def test_beta_metric_import_sets_import_batch(self):
+        sample_b = Sample.objects.create(study=self.study, label='Cohort B')
+
+        preview = build_preview(
+            file_name='beta_metrics.csv',
+            content=(
+                'study_source_doi,sample_1_label,sample_2_label,metric_type,value,unit\n'
+                f'10.1000/example,{self.sample.label},{sample_b.label},bray_curtis,0.37,\n'
+            ),
+            import_type='beta_metric',
+            batch_name='Beta metric batch',
+        ).to_dict()
+
+        batch = run_import(preview)
+        metric = BetaMetric.objects.get(sample_a=self.sample, sample_b=sample_b, metric_type='bray_curtis')
+
+        self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
+        self.assertEqual(metric.import_batch, batch)
+        self.assertEqual(metric.value, 0.37)

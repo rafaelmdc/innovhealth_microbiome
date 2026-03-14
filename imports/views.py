@@ -80,6 +80,23 @@ PREVIEW_COLUMNS = {
         ('method', 'Method'),
         ('confidence', 'Confidence'),
     ],
+    'alpha_metric': [
+        ('row_number', 'Row'),
+        ('study_source_doi', 'Study DOI'),
+        ('sample_label', 'Sample Label'),
+        ('metric_type', 'Metric Type'),
+        ('value', 'Value'),
+        ('unit', 'Unit'),
+    ],
+    'beta_metric': [
+        ('row_number', 'Row'),
+        ('study_source_doi', 'Study DOI'),
+        ('sample_1_label', 'Sample 1 Label'),
+        ('sample_2_label', 'Sample 2 Label'),
+        ('metric_type', 'Metric Type'),
+        ('value', 'Value'),
+        ('unit', 'Unit'),
+    ],
 }
 
 
