@@ -1,0 +1,22 @@
+{% extends "admin/base.html" %}
+{% load static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+  >
+  <link rel="stylesheet" href="{% static 'css/admin.css' %}">
+{% endblock %}
+
+{% block branding %}
+  <div class="admin-branding">
+    <a id="site-name" href="{% url 'admin:index' %}">Innov Health Microbiome Admin</a>
+    <span class="admin-subtitle">Curated microbiome curation workspace</span>
+  </div>
+{% endblock %}
+
+{% block nav-global %}{% endblock %}
