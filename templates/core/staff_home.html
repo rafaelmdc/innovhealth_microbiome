@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Staff Workspace{% endblock %}
+{% block body_class %}staff-page{% endblock %}
+
+{% block content %}
+<section class="page-intro detail-hero mb-4">
+  <span class="eyebrow-chip mb-3">Protected staff workspace</span>
+  <h1 class="mb-2">Staff Workspace</h1>
+  <p class="text-secondary mb-0">
+    Internal tools for curation and batch ingestion. This area is available only to authenticated staff users.
+  </p>
+</section>
+
+<section class="row g-4">
+  <div class="col-lg-6">
+    <div class="card h-100 shadow-sm feature-card">
+      <div class="card-body">
+        <h2 class="h4">CSV Imports</h2>
+        <p class="text-secondary">
+          Upload validated batch files, preview parsed rows, review duplicates, and record provenance through import batches.
+        </p>
+        <a class="btn btn-primary mt-3" href="{% url 'imports:upload' %}">Open imports</a>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card h-100 shadow-sm feature-card">
+      <div class="card-body">
+        <h2 class="h4">Django Admin</h2>
+        <p class="text-secondary">
+          Use the admin for manual curation, record-by-record editing, inlines, and internal review workflows.
+        </p>
+        <a class="btn btn-outline-primary mt-3" href="{% url 'admin:index' %}">Open admin</a>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
