@@ -1,4 +1,7 @@
+from io import BytesIO
+
 from django.test import TestCase
+from openpyxl import Workbook
 
 from database.models import (
     AlphaMetric,
@@ -210,3 +213,138 @@ class ImportServiceTests(TestCase):
         self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
         self.assertEqual(metric.import_batch, batch)
         self.assertEqual(metric.value, 0.37)
+
+    def _build_workbook_bytes(self):
+        workbook = Workbook()
+        paper_sheet = workbook.active
+        paper_sheet.title = 'paper'
+        paper_sheet.append(
+            ['paper_id', 'doi', 'authors', 'year', 'title', 'country', 'topic', 'status', 'reviwer', 'notes']
+        )
+        paper_sheet.append(
+            ['paper-1', '10.2000/workbook', 'A. Author, B. Author', 2024, 'Workbook Study', 'Portugal', 'IBD', 'complete', 'Rafael', 'Paper note']
+        )
+        paper_sheet.append(
+            ['paper-2', '10.2000/skip', 'C. Author', 2023, 'Skipped Study', 'Spain', 'Control', 'needs_review', 'Rafael', 'Skip me']
+        )
+
+        group_sheet = workbook.create_sheet('groups')
+        group_sheet.append(
+            ['group_id', 'paper_id', 'group_name_as_written', 'condition', 'group_type', 'body_site', 'sample_size', 'age', 'women_percent', 'age2', 'where_found', 'notes']
+        )
+        group_sheet.append(['g1', 'paper-1', 'Cases', 'IBD', 'case', 'gut', 12, 40.5, 60, 'adult', 'Methods', 'Case group'])
+        group_sheet.append(['g2', 'paper-1', 'Controls', 'Healthy', 'control', 'gut', 10, 38, 55, '', 'Methods', 'Control group'])
+        group_sheet.append(['g3', 'paper-2', 'Skipped Group', 'Other', 'other', 'gut', 5, '', '', '', '', 'Should skip'])
+
+        comparison_sheet = workbook.create_sheet('comparissons')
+        comparison_sheet.append(
+            ['comparison_id', 'paper_id', 'target_group_id', 'reference_group_id', 'target_condition', 'reference_condition', 'comparison_type', 'notes']
+        )
+        comparison_sheet.append(['c1', 'paper-1', 'g1', 'g2', 'IBD', 'Healthy', 'case_vs_control', 'Comparison note'])
+
+        qualitative_sheet = workbook.create_sheet('qualitative_findings')
+        qualitative_sheet.append(
+            ['finding_id', 'paper_id', 'comparison_id', 'organism_id', 'organism_as_writiten', 'direction', 'finding_type', 'where_found', 'notes']
+        )
+        qualitative_sheet.append(['f1', 'paper-1', 'c1', 'o1', 'Blautia sp.', 'increased_in_target', 'relative_direction', 'Table 2', 'Finding note'])
+
+        quantitative_sheet = workbook.create_sheet('quantitative_findings')
+        quantitative_sheet.append(
+            ['quant_finding_id', 'paper_id', 'group_id', 'organism_id', 'value_type', 'unit', 'value', 'where_found', 'notes']
+        )
+        quantitative_sheet.append(['q1', 'paper-1', 'g1', 'o1', 'relative_abundance', '%', 0.42, 'Table 3', 'Quant note'])
+
+        diversity_sheet = workbook.create_sheet('diversity_metrics')
+        diversity_sheet.append(
+            ['diversity_id', 'paper_id', 'comparison_id', 'group_id', 'diversity_category', 'metric_as_written', 'value', 'unit', 'where_found', 'notes']
+        )
+        diversity_sheet.append(['d1', 'paper-1', '', 'g1', 'alpha', 'shannon', 3.4, '', 'Table 4', 'Alpha note'])
+        diversity_sheet.append(['d2', 'paper-1', 'c1', '', 'beta', 'bray_curtis', 0.28, '', 'Figure 2', 'Beta note'])
+
+        organism_sheet = workbook.create_sheet('organisms')
+        organism_sheet.append(
+            ['organism_id', 'organism_as_written', 'suggested_clean_name', 'rank_if_known', 'notes', 'ncbi_id', 'resolved']
+        )
+        organism_sheet.append(['o1', 'Blautia sp.', 'Blautia', 'genus', 'Organism note', 1234, 'false'])
+
+        metadata_sheet = workbook.create_sheet('extra_metadata')
+        metadata_sheet.append(['paper_id', 'group_id', 'field_name', 'value_as_written', 'unit', 'where_found', 'notes'])
+        metadata_sheet.append(['paper-1', 'g1', 'bmi', '24.5', 'kg/m2', 'Table 1', 'BMI note'])
+
+        output = BytesIO()
+        workbook.save(output)
+        return output.getvalue()
+
+    def test_excel_workbook_preview_and_import_creates_related_records(self):
+        preview = build_preview(
+            file_name='curation.xlsx',
+            content=self._build_workbook_bytes(),
+            import_type='excel_workbook',
+            batch_name='Workbook batch',
+        )
+
+        self.assertEqual(preview.import_type, 'excel_workbook')
+        self.assertEqual(len(preview.errors), 0)
+        self.assertEqual(len(preview.sections), 10)
+        self.assertEqual(len(preview.skipped_rows), 2)
+
+        batch = run_import(preview.to_dict())
+
+        self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
+        study = Study.objects.get(doi='10.2000/workbook')
+        cases = Group.objects.get(study=study, name='Cases')
+        controls = Group.objects.get(study=study, name='Controls')
+        comparison = Comparison.objects.get(
+            study=study,
+            group_a=cases,
+            group_b=controls,
+            label='Cases vs Controls (case_vs_control)',
+        )
+        organism = Organism.objects.get(scientific_name='Blautia sp.')
+        qualitative = QualitativeFinding.objects.get(comparison=comparison, organism=organism)
+        quantitative = QuantitativeFinding.objects.get(group=cases, organism=organism)
+        alpha = AlphaMetric.objects.get(group=cases, metric='shannon')
+        beta = BetaMetric.objects.get(comparison=comparison, metric='bray_curtis')
+        bmi_variable = MetadataVariable.objects.get(name='bmi')
+        bmi_value = MetadataValue.objects.get(group=cases, variable=bmi_variable)
+        age_variable = MetadataVariable.objects.get(name='age')
+        age_value = MetadataValue.objects.get(group=cases, variable=age_variable)
+
+        self.assertIn('Authors: A. Author, B. Author', study.notes)
+        self.assertEqual(qualitative.direction, QualitativeFinding.Direction.ENRICHED)
+        self.assertEqual(qualitative.import_batch, batch)
+        self.assertEqual(quantitative.value, 0.42)
+        self.assertEqual(alpha.import_batch, batch)
+        self.assertEqual(beta.import_batch, batch)
+        self.assertEqual(bmi_variable.value_type, MetadataVariable.ValueType.TEXT)
+        self.assertEqual(bmi_value.value_text, '24.5')
+        self.assertEqual(age_variable.value_type, MetadataVariable.ValueType.FLOAT)
+        self.assertEqual(age_value.value_float, 40.5)
+        self.assertFalse(Study.objects.filter(doi='10.2000/skip').exists())
+
+    def test_excel_workbook_preview_reports_missing_group_reference(self):
+        workbook = Workbook()
+        paper_sheet = workbook.active
+        paper_sheet.title = 'paper'
+        paper_sheet.append(['paper_id', 'doi', 'authors', 'year', 'title', 'country', 'topic', 'status', 'reviwer', 'notes'])
+        paper_sheet.append(['paper-1', '10.3000/error', '', 2024, 'Broken Workbook', '', '', 'complete', '', ''])
+
+        comparison_sheet = workbook.create_sheet('comparissons')
+        comparison_sheet.append(
+            ['comparison_id', 'paper_id', 'target_group_id', 'reference_group_id', 'target_condition', 'reference_condition', 'comparison_type', 'notes']
+        )
+        comparison_sheet.append(['c1', 'paper-1', 'missing-a', 'missing-b', '', '', 'case_vs_control', ''])
+
+        output = BytesIO()
+        workbook.save(output)
+
+        preview = build_preview(
+            file_name='broken.xlsx',
+            content=output.getvalue(),
+            import_type='excel_workbook',
+            batch_name='Broken workbook batch',
+        )
+
+        self.assertEqual(preview.import_type, 'excel_workbook')
+        self.assertTrue(any(error['section'] == 'comparison' for error in preview.errors))
+        self.assertFalse(any(section['valid_rows'] for section in preview.sections if section['import_type'] == 'comparison'))

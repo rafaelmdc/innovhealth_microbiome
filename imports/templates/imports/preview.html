@@ -87,47 +87,109 @@
     </div>
   </div>
 
-  <p><strong>Required columns:</strong> {{ preview.required_columns|join:", " }}</p>
-
-  {% if preview.errors %}
-    <h2>Validation Errors</h2>
-    <ul class="import-list">
-      {% for error in preview.errors %}
-        <li>Row {{ error.row_number|default:"-" }}: {{ error.message }}</li>
-      {% endfor %}
-    </ul>
+  {% if preview.required_columns %}
+    <p><strong>Required columns:</strong> {{ preview.required_columns|join:", " }}</p>
   {% endif %}
 
-  {% if preview.duplicates %}
-    <h2>Duplicates</h2>
-    <ul class="import-list">
-      {% for duplicate in preview.duplicates %}
-        <li>Row {{ duplicate.row_number }}: {{ duplicate.message }}</li>
-      {% endfor %}
-    </ul>
-  {% endif %}
+  {% if preview.import_type == 'excel_workbook' %}
+    {% if preview.skipped_rows %}
+      <h2>Skipped Rows</h2>
+      <ul class="import-list">
+        {% for row in preview.skipped_rows %}
+          <li>{{ row.section }} row {{ row.row_number|default:"-" }}: {{ row.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
 
-  {% if preview.valid_rows %}
-    <h2>Rows To Import</h2>
-    <table class="import-table">
-      <thead>
-        <tr>
-          {% for key, label in preview_columns %}
-            <th>{{ label }}</th>
-          {% endfor %}
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in preview.valid_rows %}
+    {% if preview.errors %}
+      <h2>Validation Errors</h2>
+      <ul class="import-list">
+        {% for error in preview.errors %}
+          <li>{{ error.section }} row {{ error.row_number|default:"-" }}: {{ error.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if preview.duplicates %}
+      <h2>Duplicates</h2>
+      <ul class="import-list">
+        {% for duplicate in preview.duplicates %}
+          <li>{{ duplicate.section }} row {{ duplicate.row_number|default:"-" }}: {{ duplicate.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% for section in section_previews %}
+      <h2>{{ section.label }}</h2>
+      <p>
+        {{ section.valid_rows|length }} rows to import,
+        {{ section.duplicates|length }} duplicates,
+        {{ section.errors|length }} errors.
+      </p>
+      {% if section.valid_rows %}
+        <table class="import-table">
+          <thead>
+            <tr>
+              {% for key, label in section.preview_columns %}
+                <th>{{ label }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in section.valid_rows %}
+              <tr>
+                {% for key, label in section.preview_columns %}
+                  <td>{{ row|get_item:key|default:"" }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    {% if preview.errors %}
+      <h2>Validation Errors</h2>
+      <ul class="import-list">
+        {% for error in preview.errors %}
+          <li>Row {{ error.row_number|default:"-" }}: {{ error.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if preview.duplicates %}
+      <h2>Duplicates</h2>
+      <ul class="import-list">
+        {% for duplicate in preview.duplicates %}
+          <li>Row {{ duplicate.row_number }}: {{ duplicate.message }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    {% if preview.valid_rows %}
+      <h2>Rows To Import</h2>
+      <table class="import-table">
+        <thead>
           <tr>
             {% for key, label in preview_columns %}
-              <td>{{ row|get_item:key|default:"" }}</td>
+              <th>{{ label }}</th>
             {% endfor %}
           </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {% for row in preview.valid_rows %}
+            <tr>
+              {% for key, label in preview_columns %}
+                <td>{{ row|get_item:key|default:"" }}</td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% endif %}
 
+  {% if preview.valid_rows or section_previews %}
     <div class="import-actions">
       <form method="post" action="{% url 'imports:confirm' %}">
         {% csrf_token %}

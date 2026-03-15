@@ -8,7 +8,10 @@ from .forms import CsvImportUploadForm
 from .services import build_preview, run_import
 
 PREVIEW_SESSION_KEY = 'imports_preview'
-IMPORT_TYPE_LABELS = dict(CsvImportUploadForm.IMPORT_TYPE_CHOICES)
+IMPORT_TYPE_LABELS = {
+    **dict(CsvImportUploadForm.IMPORT_TYPE_CHOICES),
+    CsvImportUploadForm.SOURCE_FORMAT_WORKBOOK: 'Excel Workbook',
+}
 PREVIEW_COLUMNS = {
     'organism': [
         ('row_number', 'Row'),
@@ -111,15 +114,30 @@ def upload_csv(request):
     if request.method == 'POST':
         form = CsvImportUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            csv_file = form.cleaned_data['csv_file']
-            preview = build_preview(
-                file_name=csv_file.name,
-                content=csv_file.read().decode('utf-8-sig'),
-                import_type=form.cleaned_data['import_type'],
-                batch_name=form.cleaned_data['name'],
+            data_file = form.cleaned_data['data_file']
+            source_format = form.cleaned_data['source_format']
+            import_type = (
+                form.cleaned_data['import_type']
+                if source_format == CsvImportUploadForm.SOURCE_FORMAT_CSV
+                else CsvImportUploadForm.SOURCE_FORMAT_WORKBOOK
             )
-            request.session[PREVIEW_SESSION_KEY] = preview.to_dict()
-            return redirect('imports:preview')
+            try:
+                content = (
+                    data_file.read().decode('utf-8-sig')
+                    if source_format == CsvImportUploadForm.SOURCE_FORMAT_CSV
+                    else data_file.read()
+                )
+                preview = build_preview(
+                    file_name=data_file.name,
+                    content=content,
+                    import_type=import_type,
+                    batch_name=form.cleaned_data['name'],
+                )
+            except (UnicodeDecodeError, ValueError) as exc:
+                form.add_error('data_file', str(exc))
+            else:
+                request.session[PREVIEW_SESSION_KEY] = preview.to_dict()
+                return redirect('imports:preview')
     else:
         form = CsvImportUploadForm()
 
@@ -142,8 +160,25 @@ def preview_csv(request):
     import_type = preview['import_type']
     preview_columns = PREVIEW_COLUMNS.get(
         import_type,
-        [(key, key.replace('_', ' ').title()) for key in preview['valid_rows'][0].keys()] if preview['valid_rows'] else [],
+        [(key, key.replace('_', ' ').title()) for key in preview['valid_rows'][0].keys()] if preview.get('valid_rows') else [],
     )
+    section_previews = []
+    if import_type == CsvImportUploadForm.SOURCE_FORMAT_WORKBOOK:
+        for section in preview.get('sections', []):
+            section_columns = PREVIEW_COLUMNS.get(
+                section['import_type'],
+                [(key, key.replace('_', ' ').title()) for key in section['valid_rows'][0].keys()] if section.get('valid_rows') else [],
+            )
+            section_previews.append(
+                {
+                    **section,
+                    'label': IMPORT_TYPE_LABELS.get(
+                        section['import_type'],
+                        section['import_type'].replace('_', ' ').title(),
+                    ),
+                    'preview_columns': section_columns,
+                }
+            )
     return render(
         request,
         'imports/preview.html',
@@ -151,6 +186,7 @@ def preview_csv(request):
             'preview': preview,
             'import_label': IMPORT_TYPE_LABELS.get(import_type, import_type.replace('_', ' ').title()),
             'preview_columns': preview_columns,
+            'section_previews': section_previews,
         },
     )
 

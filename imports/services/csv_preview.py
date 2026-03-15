@@ -1,15 +1,10 @@
-import csv
-from dataclasses import asdict, dataclass
-from io import StringIO
-
-from django.db import transaction
+"""Preview builders for the CSV contract import paths."""
 
 from database.models import (
     AlphaMetric,
     BetaMetric,
     Comparison,
     Group,
-    ImportBatch,
     MetadataValue,
     MetadataVariable,
     Organism,
@@ -18,85 +13,23 @@ from database.models import (
     Study,
 )
 
-
-@dataclass
-class ImportPreview:
-    batch_name: str
-    import_type: str
-    required_columns: list[str]
-    file_name: str
-    total_rows: int
-    valid_rows: list[dict]
-    errors: list[dict]
-    duplicates: list[dict]
-
-    def to_dict(self):
-        return asdict(self)
-
-
-SUPPORTED_IMPORT_TYPES = (
-    'organism',
-    'study',
-    'group',
-    'comparison',
-    'metadata_variable',
-    'metadata_value',
-    'qualitative_finding',
-    'quantitative_finding',
-    'alpha_metric',
-    'beta_metric',
+from .helpers import (
+    cleaned_row,
+    parse_float,
+    parse_optional_bool,
+    parse_optional_float,
+    parse_optional_int,
+    resolve_comparison,
+    resolve_group,
+    resolve_organism,
+    resolve_study,
+    row_requires_study_reference,
 )
-
-BOOLEAN_TRUE_VALUES = {'1', 'true', 'yes', 'on'}
-BOOLEAN_FALSE_VALUES = {'0', 'false', 'no', 'off'}
+from .types import ImportPreview
 
 
-def build_preview(*, file_name, content, import_type, batch_name):
-    if import_type not in SUPPORTED_IMPORT_TYPES:
-        raise ValueError(f'Unsupported import type: {import_type}')
-
-    reader = csv.DictReader(StringIO(content))
-    fieldnames = reader.fieldnames or []
-    rows = list(reader)
-    preview_builder = PREVIEW_BUILDERS[import_type]
-    return preview_builder(
-        file_name=file_name,
-        fieldnames=fieldnames,
-        rows=rows,
-        batch_name=batch_name,
-        import_type=import_type,
-    )
-
-
-@transaction.atomic
-def run_import(preview_data):
-    import_type = preview_data['import_type']
-    if import_type not in IMPORT_RUNNERS:
-        raise ValueError(f'Unsupported import type: {import_type}')
-
-    batch = ImportBatch.objects.create(
-        name=preview_data['batch_name'],
-        import_type=f'{import_type}_csv',
-        status=ImportBatch.Status.VALIDATED,
-        source_file=preview_data.get('file_name', ''),
-    )
-
-    created_count = IMPORT_RUNNERS[import_type](preview_data['valid_rows'], batch)
-    duplicate_count = len(preview_data.get('duplicates', []))
-    error_count = len(preview_data.get('errors', []))
-    batch.success_count = created_count
-    batch.error_count = duplicate_count + error_count
-    batch.status = ImportBatch.Status.COMPLETED if error_count == 0 else ImportBatch.Status.FAILED
-    batch.notes = (
-        f'Imported {created_count} {import_type} rows from CSV. '
-        f'Skipped {duplicate_count} duplicates. '
-        f'Validation errors: {error_count}.'
-    )
-    batch.save(update_fields=['success_count', 'error_count', 'status', 'notes'])
-    return batch
-
-
-def _missing_columns_preview(*, batch_name, import_type, file_name, required_columns, missing_columns):
+def missing_columns_preview(*, batch_name, import_type, file_name, required_columns, missing_columns):
+    """Build a preview response for a file that is missing required columns."""
     return ImportPreview(
         batch_name=batch_name,
         import_type=import_type,
@@ -114,7 +47,8 @@ def _missing_columns_preview(*, batch_name, import_type, file_name, required_col
     )
 
 
-def _build_preview_response(*, batch_name, import_type, file_name, required_columns, valid_rows, errors, duplicates):
+def build_preview_response(*, batch_name, import_type, file_name, required_columns, valid_rows, errors, duplicates):
+    """Build the normalized preview response used by the import UI and session storage."""
     return ImportPreview(
         batch_name=batch_name,
         import_type=import_type,
@@ -127,107 +61,12 @@ def _build_preview_response(*, batch_name, import_type, file_name, required_colu
     )
 
 
-def _cleaned_row(raw_row):
-    return {key: (value or '').strip() for key, value in raw_row.items()}
-
-
-def _parse_int(value, field_name):
-    try:
-        return int(value), None
-    except (TypeError, ValueError):
-        return None, f'{field_name} must be an integer.'
-
-
-def _parse_float(value, field_name):
-    try:
-        return float(value), None
-    except (TypeError, ValueError):
-        return None, f'{field_name} must be a float.'
-
-
-def _parse_optional_int(value, field_name):
-    if value == '':
-        return None, None
-    return _parse_int(value, field_name)
-
-
-def _parse_optional_float(value, field_name):
-    if value == '':
-        return None, None
-    return _parse_float(value, field_name)
-
-
-def _parse_optional_bool(value, field_name):
-    if value == '':
-        return None, None
-    normalized = value.lower()
-    if normalized in BOOLEAN_TRUE_VALUES:
-        return True, None
-    if normalized in BOOLEAN_FALSE_VALUES:
-        return False, None
-    return None, f'{field_name} must be a boolean.'
-
-
-def _resolve_study(study_doi, study_title):
-    if study_doi:
-        return Study.objects.filter(doi=study_doi).first()
-    if study_title:
-        return Study.objects.filter(title=study_title).first()
-    return None
-
-
-def _resolve_group(study_doi, study_title, group_name):
-    if not group_name:
-        return None
-    study = _resolve_study(study_doi, study_title)
-    if not study:
-        return None
-    return Group.objects.filter(study=study, name=group_name).select_related('study').first()
-
-
-def _resolve_comparison(study_doi, study_title, group_a_name, group_b_name, label):
-    study = _resolve_study(study_doi, study_title)
-    if not study:
-        return None
-    return (
-        Comparison.objects.filter(
-            study=study,
-            group_a__name=group_a_name,
-            group_b__name=group_b_name,
-            label=label,
-        )
-        .select_related('study', 'group_a', 'group_b')
-        .first()
-    )
-
-
-def _resolve_organism(scientific_name, ncbi_taxonomy_id):
-    if ncbi_taxonomy_id is not None:
-        organism = Organism.objects.filter(ncbi_taxonomy_id=ncbi_taxonomy_id).first()
-        if organism:
-            return organism
-    if scientific_name:
-        return Organism.objects.filter(scientific_name__iexact=scientific_name).first()
-    return None
-
-
-def _row_requires_study_reference(row, errors, row_number):
-    if row.get('study_doi') or row.get('study_title'):
-        return True
-    errors.append(
-        {
-            'row_number': row_number,
-            'message': 'At least one of study_doi or study_title is required.',
-        }
-    )
-    return False
-
-
-def _build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview organism CSV rows."""
     required_columns = ('scientific_name', 'rank')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -246,12 +85,12 @@ def _build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_t
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
+        row = cleaned_row(raw_row)
         if not row['scientific_name'] or not row['rank']:
             errors.append({'row_number': row_number, 'message': 'scientific_name and rank are required.'})
             continue
 
-        taxonomy_id, taxonomy_error = _parse_optional_int(row.get('ncbi_taxonomy_id', ''), 'ncbi_taxonomy_id')
+        taxonomy_id, taxonomy_error = parse_optional_int(row.get('ncbi_taxonomy_id', ''), 'ncbi_taxonomy_id')
         if taxonomy_error:
             errors.append({'row_number': row_number, 'message': taxonomy_error})
             continue
@@ -281,7 +120,7 @@ def _build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_t
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -292,11 +131,12 @@ def _build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_t
     )
 
 
-def _build_study_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_study_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview study CSV rows."""
     required_columns = ('title',)
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -313,12 +153,12 @@ def _build_study_preview(*, file_name, fieldnames, rows, batch_name, import_type
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
+        row = cleaned_row(raw_row)
         if not row['title']:
             errors.append({'row_number': row_number, 'message': 'title is required.'})
             continue
 
-        year, year_error = _parse_optional_int(row.get('year', ''), 'year')
+        year, year_error = parse_optional_int(row.get('year', ''), 'year')
         if year_error:
             errors.append({'row_number': row_number, 'message': year_error})
             continue
@@ -350,7 +190,7 @@ def _build_study_preview(*, file_name, fieldnames, rows, batch_name, import_type
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -361,11 +201,12 @@ def _build_study_preview(*, file_name, fieldnames, rows, batch_name, import_type
     )
 
 
-def _build_group_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_group_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview group CSV rows against existing studies."""
     required_columns = ('study_doi', 'study_title', 'name')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -380,19 +221,19 @@ def _build_group_preview(*, file_name, fieldnames, rows, batch_name, import_type
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['name']:
             errors.append({'row_number': row_number, 'message': 'name is required.'})
             continue
 
-        study = _resolve_study(row['study_doi'], row['study_title'])
+        study = resolve_study(row['study_doi'], row['study_title'])
         if not study:
             errors.append({'row_number': row_number, 'message': 'Study reference does not resolve to an existing Study.'})
             continue
 
-        sample_size, sample_size_error = _parse_optional_int(row.get('sample_size', ''), 'sample_size')
+        sample_size, sample_size_error = parse_optional_int(row.get('sample_size', ''), 'sample_size')
         if sample_size_error:
             errors.append({'row_number': row_number, 'message': sample_size_error})
             continue
@@ -421,7 +262,7 @@ def _build_group_preview(*, file_name, fieldnames, rows, batch_name, import_type
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -432,11 +273,12 @@ def _build_group_preview(*, file_name, fieldnames, rows, batch_name, import_type
     )
 
 
-def _build_comparison_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_comparison_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview comparison CSV rows against existing groups."""
     required_columns = ('study_doi', 'study_title', 'group_a_name', 'group_b_name', 'label')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -451,15 +293,15 @@ def _build_comparison_preview(*, file_name, fieldnames, rows, batch_name, import
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['group_a_name'] or not row['group_b_name'] or not row['label']:
             errors.append({'row_number': row_number, 'message': 'group_a_name, group_b_name, and label are required.'})
             continue
 
-        group_a = _resolve_group(row['study_doi'], row['study_title'], row['group_a_name'])
-        group_b = _resolve_group(row['study_doi'], row['study_title'], row['group_b_name'])
+        group_a = resolve_group(row['study_doi'], row['study_title'], row['group_a_name'])
+        group_b = resolve_group(row['study_doi'], row['study_title'], row['group_b_name'])
         if not group_a or not group_b:
             errors.append({'row_number': row_number, 'message': 'Both groups must resolve to existing Group rows.'})
             continue
@@ -491,7 +333,7 @@ def _build_comparison_preview(*, file_name, fieldnames, rows, batch_name, import
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -502,11 +344,12 @@ def _build_comparison_preview(*, file_name, fieldnames, rows, batch_name, import
     )
 
 
-def _build_metadata_variable_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_metadata_variable_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview metadata variable CSV rows."""
     required_columns = ('name', 'value_type')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -521,7 +364,7 @@ def _build_metadata_variable_preview(*, file_name, fieldnames, rows, batch_name,
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
+        row = cleaned_row(raw_row)
         if not row['name'] or not row['value_type']:
             errors.append({'row_number': row_number, 'message': 'name and value_type are required.'})
             continue
@@ -529,7 +372,7 @@ def _build_metadata_variable_preview(*, file_name, fieldnames, rows, batch_name,
             errors.append({'row_number': row_number, 'message': 'value_type must be one of: float, int, text, bool.'})
             continue
 
-        is_filterable, bool_error = _parse_optional_bool(row.get('is_filterable', ''), 'is_filterable')
+        is_filterable, bool_error = parse_optional_bool(row.get('is_filterable', ''), 'is_filterable')
         if bool_error:
             errors.append({'row_number': row_number, 'message': bool_error})
             continue
@@ -552,7 +395,7 @@ def _build_metadata_variable_preview(*, file_name, fieldnames, rows, batch_name,
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -563,11 +406,12 @@ def _build_metadata_variable_preview(*, file_name, fieldnames, rows, batch_name,
     )
 
 
-def _build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview metadata value CSV rows, including typed-value enforcement."""
     required_columns = ('study_doi', 'study_title', 'group_name', 'variable_name')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -583,14 +427,14 @@ def _build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, im
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['group_name'] or not row['variable_name']:
             errors.append({'row_number': row_number, 'message': 'group_name and variable_name are required.'})
             continue
 
-        group = _resolve_group(row['study_doi'], row['study_title'], row['group_name'])
+        group = resolve_group(row['study_doi'], row['study_title'], row['group_name'])
         if not group:
             errors.append({'row_number': row_number, 'message': 'Group reference does not resolve to an existing Group.'})
             continue
@@ -603,14 +447,14 @@ def _build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, im
         typed_fields = {}
         typed_count = 0
 
-        value_float, float_error = _parse_optional_float(row.get('value_float', ''), 'value_float')
+        value_float, float_error = parse_optional_float(row.get('value_float', ''), 'value_float')
         if float_error:
             errors.append({'row_number': row_number, 'message': float_error})
             continue
         typed_fields['value_float'] = value_float
         typed_count += value_float is not None
 
-        value_int, int_error = _parse_optional_int(row.get('value_int', ''), 'value_int')
+        value_int, int_error = parse_optional_int(row.get('value_int', ''), 'value_int')
         if int_error:
             errors.append({'row_number': row_number, 'message': int_error})
             continue
@@ -621,7 +465,7 @@ def _build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, im
         typed_fields['value_text'] = value_text or None
         typed_count += bool(value_text)
 
-        value_bool, bool_error = _parse_optional_bool(row.get('value_bool', ''), 'value_bool')
+        value_bool, bool_error = parse_optional_bool(row.get('value_bool', ''), 'value_bool')
         if bool_error:
             errors.append({'row_number': row_number, 'message': bool_error})
             continue
@@ -665,7 +509,7 @@ def _build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, im
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -676,7 +520,8 @@ def _build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, im
     )
 
 
-def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview qualitative finding CSV rows against comparisons and organisms."""
     required_columns = (
         'study_doi',
         'study_title',
@@ -689,7 +534,7 @@ def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
     )
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -706,8 +551,8 @@ def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['group_a_name'] or not row['group_b_name'] or not row['comparison_label']:
             errors.append({'row_number': row_number, 'message': 'Comparison reference fields are required.'})
@@ -716,7 +561,7 @@ def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
             errors.append({'row_number': row_number, 'message': 'organism_scientific_name, direction, and source are required.'})
             continue
 
-        comparison = _resolve_comparison(
+        comparison = resolve_comparison(
             row['study_doi'],
             row['study_title'],
             row['group_a_name'],
@@ -727,11 +572,14 @@ def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
             errors.append({'row_number': row_number, 'message': 'Comparison reference does not resolve to an existing Comparison.'})
             continue
 
-        taxonomy_id, taxonomy_error = _parse_optional_int(row.get('organism_ncbi_taxonomy_id', ''), 'organism_ncbi_taxonomy_id')
+        taxonomy_id, taxonomy_error = parse_optional_int(
+            row.get('organism_ncbi_taxonomy_id', ''),
+            'organism_ncbi_taxonomy_id',
+        )
         if taxonomy_error:
             errors.append({'row_number': row_number, 'message': taxonomy_error})
             continue
-        organism = _resolve_organism(row['organism_scientific_name'], taxonomy_id)
+        organism = resolve_organism(row['organism_scientific_name'], taxonomy_id)
         if not organism:
             errors.append({'row_number': row_number, 'message': 'Organism reference does not resolve to an existing Organism.'})
             continue
@@ -766,7 +614,7 @@ def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -777,7 +625,8 @@ def _build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
     )
 
 
-def _build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview quantitative finding CSV rows against groups and organisms."""
     required_columns = (
         'study_doi',
         'study_title',
@@ -789,7 +638,7 @@ def _build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_na
     )
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -806,23 +655,26 @@ def _build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_na
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['group_name'] or not row['organism_scientific_name'] or not row['value_type'] or not row['source']:
             errors.append({'row_number': row_number, 'message': 'group_name, organism_scientific_name, value_type, and source are required.'})
             continue
 
-        group = _resolve_group(row['study_doi'], row['study_title'], row['group_name'])
+        group = resolve_group(row['study_doi'], row['study_title'], row['group_name'])
         if not group:
             errors.append({'row_number': row_number, 'message': 'Group reference does not resolve to an existing Group.'})
             continue
 
-        taxonomy_id, taxonomy_error = _parse_optional_int(row.get('organism_ncbi_taxonomy_id', ''), 'organism_ncbi_taxonomy_id')
+        taxonomy_id, taxonomy_error = parse_optional_int(
+            row.get('organism_ncbi_taxonomy_id', ''),
+            'organism_ncbi_taxonomy_id',
+        )
         if taxonomy_error:
             errors.append({'row_number': row_number, 'message': taxonomy_error})
             continue
-        organism = _resolve_organism(row['organism_scientific_name'], taxonomy_id)
+        organism = resolve_organism(row['organism_scientific_name'], taxonomy_id)
         if not organism:
             errors.append({'row_number': row_number, 'message': 'Organism reference does not resolve to an existing Organism.'})
             continue
@@ -831,7 +683,7 @@ def _build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_na
             errors.append({'row_number': row_number, 'message': 'value_type must be one of: relative_abundance.'})
             continue
 
-        value, value_error = _parse_float(row.get('value', ''), 'value')
+        value, value_error = parse_float(row.get('value', ''), 'value')
         if value_error:
             errors.append({'row_number': row_number, 'message': value_error})
             continue
@@ -862,7 +714,7 @@ def _build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_na
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -873,11 +725,12 @@ def _build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_na
     )
 
 
-def _build_alpha_metric_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_alpha_metric_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview alpha metric CSV rows."""
     required_columns = ('study_doi', 'study_title', 'group_name', 'metric', 'value', 'source')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -892,19 +745,19 @@ def _build_alpha_metric_preview(*, file_name, fieldnames, rows, batch_name, impo
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['group_name'] or not row['metric'] or not row['source']:
             errors.append({'row_number': row_number, 'message': 'group_name, metric, and source are required.'})
             continue
 
-        group = _resolve_group(row['study_doi'], row['study_title'], row['group_name'])
+        group = resolve_group(row['study_doi'], row['study_title'], row['group_name'])
         if not group:
             errors.append({'row_number': row_number, 'message': 'Group reference does not resolve to an existing Group.'})
             continue
 
-        value, value_error = _parse_float(row.get('value', ''), 'value')
+        value, value_error = parse_float(row.get('value', ''), 'value')
         if value_error:
             errors.append({'row_number': row_number, 'message': value_error})
             continue
@@ -932,7 +785,7 @@ def _build_alpha_metric_preview(*, file_name, fieldnames, rows, batch_name, impo
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -943,7 +796,8 @@ def _build_alpha_metric_preview(*, file_name, fieldnames, rows, batch_name, impo
     )
 
 
-def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+def build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview beta metric CSV rows."""
     required_columns = (
         'study_doi',
         'study_title',
@@ -956,7 +810,7 @@ def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, impor
     )
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
-        return _missing_columns_preview(
+        return missing_columns_preview(
             batch_name=batch_name,
             import_type=import_type,
             file_name=file_name,
@@ -971,14 +825,14 @@ def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, impor
     duplicates = []
 
     for row_number, raw_row in enumerate(rows, start=2):
-        row = _cleaned_row(raw_row)
-        if not _row_requires_study_reference(row, errors, row_number):
+        row = cleaned_row(raw_row)
+        if not row_requires_study_reference(row, errors, row_number):
             continue
         if not row['group_a_name'] or not row['group_b_name'] or not row['comparison_label'] or not row['metric'] or not row['source']:
             errors.append({'row_number': row_number, 'message': 'Comparison reference, metric, and source are required.'})
             continue
 
-        comparison = _resolve_comparison(
+        comparison = resolve_comparison(
             row['study_doi'],
             row['study_title'],
             row['group_a_name'],
@@ -989,7 +843,7 @@ def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, impor
             errors.append({'row_number': row_number, 'message': 'Comparison reference does not resolve to an existing Comparison.'})
             continue
 
-        value, value_error = _parse_float(row.get('value', ''), 'value')
+        value, value_error = parse_float(row.get('value', ''), 'value')
         if value_error:
             errors.append({'row_number': row_number, 'message': value_error})
             continue
@@ -1019,7 +873,7 @@ def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, impor
             }
         )
 
-    return _build_preview_response(
+    return build_preview_response(
         batch_name=batch_name,
         import_type=import_type,
         file_name=file_name,
@@ -1030,156 +884,15 @@ def _build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, impor
     )
 
 
-def _run_organism_import(valid_rows, batch):
-    for row in valid_rows:
-        Organism.objects.create(
-            ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
-            scientific_name=row['scientific_name'],
-            rank=row['rank'],
-            notes=row['notes'],
-        )
-    return len(valid_rows)
-
-
-def _run_study_import(valid_rows, batch):
-    for row in valid_rows:
-        Study.objects.create(
-            doi=row['doi'],
-            title=row['title'],
-            country=row['country'],
-            journal=row['journal'],
-            year=row['year'],
-            notes=row['notes'],
-        )
-    return len(valid_rows)
-
-
-def _run_group_import(valid_rows, batch):
-    for row in valid_rows:
-        Group.objects.create(
-            study_id=row['study_id'],
-            name=row['name'],
-            condition=row['condition'],
-            sample_size=row['sample_size'],
-            cohort=row['cohort'],
-            site=row['site'],
-            notes=row['notes'],
-        )
-    return len(valid_rows)
-
-
-def _run_comparison_import(valid_rows, batch):
-    for row in valid_rows:
-        Comparison.objects.create(
-            study_id=row['study_id'],
-            group_a_id=row['group_a_id'],
-            group_b_id=row['group_b_id'],
-            label=row['label'],
-            notes=row['notes'],
-        )
-    return len(valid_rows)
-
-
-def _run_metadata_variable_import(valid_rows, batch):
-    for row in valid_rows:
-        MetadataVariable.objects.create(
-            name=row['name'],
-            display_name=row['display_name'],
-            value_type=row['value_type'],
-            is_filterable=row['is_filterable'],
-        )
-    return len(valid_rows)
-
-
-def _run_metadata_value_import(valid_rows, batch):
-    for row in valid_rows:
-        MetadataValue.objects.create(
-            group_id=row['group_id'],
-            variable_id=row['variable_id'],
-            value_float=row['value_float'],
-            value_int=row['value_int'],
-            value_text=row['value_text'],
-            value_bool=row['value_bool'],
-        )
-    return len(valid_rows)
-
-
-def _run_qualitative_finding_import(valid_rows, batch):
-    for row in valid_rows:
-        QualitativeFinding.objects.create(
-            comparison_id=row['comparison_id'],
-            organism_id=row['organism_id'],
-            direction=row['direction'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
-        )
-    return len(valid_rows)
-
-
-def _run_quantitative_finding_import(valid_rows, batch):
-    for row in valid_rows:
-        QuantitativeFinding.objects.create(
-            group_id=row['group_id'],
-            organism_id=row['organism_id'],
-            value_type=row['value_type'],
-            value=row['value'],
-            unit=row['unit'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
-        )
-    return len(valid_rows)
-
-
-def _run_alpha_metric_import(valid_rows, batch):
-    for row in valid_rows:
-        AlphaMetric.objects.create(
-            group_id=row['group_id'],
-            metric=row['metric'],
-            value=row['value'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
-        )
-    return len(valid_rows)
-
-
-def _run_beta_metric_import(valid_rows, batch):
-    for row in valid_rows:
-        BetaMetric.objects.create(
-            comparison_id=row['comparison_id'],
-            metric=row['metric'],
-            value=row['value'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
-        )
-    return len(valid_rows)
-
-
 PREVIEW_BUILDERS = {
-    'organism': _build_organism_preview,
-    'study': _build_study_preview,
-    'group': _build_group_preview,
-    'comparison': _build_comparison_preview,
-    'metadata_variable': _build_metadata_variable_preview,
-    'metadata_value': _build_metadata_value_preview,
-    'qualitative_finding': _build_qualitative_finding_preview,
-    'quantitative_finding': _build_quantitative_finding_preview,
-    'alpha_metric': _build_alpha_metric_preview,
-    'beta_metric': _build_beta_metric_preview,
-}
-
-IMPORT_RUNNERS = {
-    'organism': _run_organism_import,
-    'study': _run_study_import,
-    'group': _run_group_import,
-    'comparison': _run_comparison_import,
-    'metadata_variable': _run_metadata_variable_import,
-    'metadata_value': _run_metadata_value_import,
-    'qualitative_finding': _run_qualitative_finding_import,
-    'quantitative_finding': _run_quantitative_finding_import,
-    'alpha_metric': _run_alpha_metric_import,
-    'beta_metric': _run_beta_metric_import,
+    'organism': build_organism_preview,
+    'study': build_study_preview,
+    'group': build_group_preview,
+    'comparison': build_comparison_preview,
+    'metadata_variable': build_metadata_variable_preview,
+    'metadata_value': build_metadata_value_preview,
+    'qualitative_finding': build_qualitative_finding_preview,
+    'quantitative_finding': build_quantitative_finding_preview,
+    'alpha_metric': build_alpha_metric_preview,
+    'beta_metric': build_beta_metric_preview,
 }

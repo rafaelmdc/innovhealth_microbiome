@@ -1,6 +1,6 @@
 # Import Pipeline
 
-The current import pipeline is a create-only CSV workflow with preview and validation before any database write.
+The current import pipeline is a create-only import workflow with preview and validation before any database write.
 
 ## Supported import types
 
@@ -14,6 +14,30 @@ The current import pipeline is a create-only CSV workflow with preview and valid
 - `quantitative_finding`
 - `alpha_metric`
 - `beta_metric`
+- `excel_workbook`
+
+## Excel workbook support
+
+The admin import screen also accepts the curator Excel workbook described in `docs/excel_import_contract.md`.
+
+Workbook behavior:
+
+- reads the known workbook sheets in memory
+- ignores helper sheets
+- imports only rows linked to papers with `status = complete`
+- validates cross-sheet workbook IDs before any write
+- converts workbook rows into the current study/group/comparison/finding/metric/metadata import shape
+- preserves the existing preview/confirm/result workflow
+
+## Service layout
+
+The importer implementation now lives in the `imports.services` package.
+
+- `imports/services/__init__.py`: stable public API used by views and tests
+- `imports/services/csv_preview.py`: CSV preview/validation logic
+- `imports/services/workbook.py`: workbook parsing, section validation, and workbook import execution
+- `imports/services/runners.py`: record creation runners
+- `imports/services/helpers.py`, `constants.py`, `types.py`: shared support code
 
 ## Resolution rules
 

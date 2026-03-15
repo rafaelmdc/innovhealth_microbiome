@@ -2,8 +2,8 @@
 
 {% block content %}
 <div id="content-main">
-  <h1>CSV Import</h1>
-  <p>Upload a CSV file for validation and preview before writing any records.</p>
+  <h1>Data Import</h1>
+  <p>Upload either a contract CSV or the curator Excel workbook for validation and preview before writing any records.</p>
 
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}
@@ -11,7 +11,7 @@
     <button type="submit" class="default">Preview Import</button>
   </form>
 
-  <h2>Supported Import Types</h2>
+  <h2>Supported CSV Import Types</h2>
   <ul>
     {% for value, label in import_choices %}
       <li>{{ label }}</li>
