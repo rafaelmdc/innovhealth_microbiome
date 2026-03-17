@@ -6,7 +6,7 @@ from openpyxl import load_workbook
 
 from database.models import Comparison, Group, Organism, Study
 
-from .constants import BOOLEAN_FALSE_VALUES, BOOLEAN_TRUE_VALUES, WORKBOOK_SHEET_ORDER
+from .constants import BOOLEAN_FALSE_VALUES, BOOLEAN_TRUE_VALUES, WORKBOOK_SHEET_ALIASES, WORKBOOK_SHEET_ORDER
 
 
 def cleaned_row(raw_row):
@@ -129,6 +129,11 @@ def normalize_workbook_cell(value):
     return str(value).strip()
 
 
+def normalize_workbook_sheet_name(sheet_name):
+    """Map workbook sheet names to the importer's canonical sheet keys."""
+    return WORKBOOK_SHEET_ALIASES.get(sheet_name.strip().lower())
+
+
 def load_workbook_rows(content):
     """Load supported workbook sheets into a normalized `{fieldnames, rows}` structure."""
     try:
@@ -138,7 +143,8 @@ def load_workbook_rows(content):
 
     sheets = {}
     for sheet_name in workbook.sheetnames:
-        if sheet_name not in WORKBOOK_SHEET_ORDER:
+        canonical_sheet_name = normalize_workbook_sheet_name(sheet_name)
+        if canonical_sheet_name not in WORKBOOK_SHEET_ORDER:
             continue
 
         worksheet = workbook[sheet_name]
@@ -146,7 +152,7 @@ def load_workbook_rows(content):
         try:
             header_row = next(iterator)
         except StopIteration:
-            sheets[sheet_name] = {'fieldnames': [], 'rows': []}
+            sheets[canonical_sheet_name] = {'fieldnames': [], 'rows': []}
             continue
 
         fieldnames = [normalize_workbook_cell(value) for value in header_row]
@@ -165,7 +171,7 @@ def load_workbook_rows(content):
                     },
                 }
             )
-        sheets[sheet_name] = {'fieldnames': fieldnames, 'rows': rows}
+        sheets[canonical_sheet_name] = {'fieldnames': fieldnames, 'rows': rows}
 
     return sheets
 
@@ -180,3 +186,13 @@ def labeled_note(label, value):
     if not value:
         return ''
     return f'{label}: {value}'
+
+
+def split_source_and_notes(source, *note_parts, max_length=255):
+    """Fit a source string into the model field and move overflow into notes."""
+    normalized_source = (source or '').strip()
+    notes = [part for part in note_parts if part]
+    if len(normalized_source) > max_length:
+        notes.append(f'Where found: {normalized_source}')
+        normalized_source = normalized_source[:max_length]
+    return normalized_source, combine_note_parts(*notes)

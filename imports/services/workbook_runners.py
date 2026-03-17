@@ -29,21 +29,21 @@ def run_workbook_import(preview_data, workbook_import_runners):
         source_file=preview_data.get('file_name', ''),
     )
 
-    created_count = 0
+    applied_count = 0
     section_counts = {}
     for section in preview_data.get('sections', []):
         import_type = section['import_type']
         runner = workbook_import_runners.get(import_type)
         if not runner:
             continue
-        section_created_count = runner(section.get('valid_rows', []), batch)
-        section_counts[import_type] = section_created_count
-        created_count += section_created_count
+        section_applied_count = runner(section.get('valid_rows', []), batch)
+        section_counts[import_type] = section_applied_count
+        applied_count += section_applied_count
 
     duplicate_count = len(preview_data.get('duplicates', []))
     error_count = len(preview_data.get('errors', []))
     skipped_count = len(preview_data.get('skipped_rows', []))
-    batch.success_count = created_count
+    batch.success_count = applied_count
     batch.error_count = duplicate_count + error_count
     batch.status = ImportBatch.Status.COMPLETED if error_count == 0 else ImportBatch.Status.FAILED
     section_summary = ', '.join(
@@ -52,9 +52,9 @@ def run_workbook_import(preview_data, workbook_import_runners):
         if count
     )
     batch.notes = (
-        f'Imported {created_count} rows from Excel workbook. '
+        f'Imported or updated {applied_count} rows from Excel workbook. '
         f'Skipped {duplicate_count} duplicates. '
-        f'Skipped {skipped_count} incomplete-paper rows. '
+        f'Skipped {skipped_count} workbook rows. '
         f'Validation errors: {error_count}.'
     )
     if section_summary:
@@ -64,135 +64,138 @@ def run_workbook_import(preview_data, workbook_import_runners):
 
 
 def run_workbook_study_import(valid_rows, batch):
-    """Create missing studies from workbook preview rows."""
-    created_count = 0
+    """Upsert studies from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         study = resolve_study(row.get('doi') or '', row['title'])
         if study:
-            continue
-        Study.objects.create(
-            doi=row['doi'],
-            title=row['title'],
-            country=row['country'],
-            journal=row['journal'],
-            year=row['year'],
-            notes=row['notes'],
-        )
-        created_count += 1
-    return created_count
+            study.doi = row['doi']
+            study.title = row['title']
+            study.country = row['country']
+            study.journal = row['journal']
+            study.year = row['year']
+            study.notes = row['notes']
+            study.save(update_fields=['doi', 'title', 'country', 'journal', 'year', 'notes', 'updated_at'])
+        else:
+            Study.objects.create(
+                doi=row['doi'],
+                title=row['title'],
+                country=row['country'],
+                journal=row['journal'],
+                year=row['year'],
+                notes=row['notes'],
+            )
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_group_import(valid_rows, batch):
-    """Create missing groups from workbook preview rows."""
-    created_count = 0
+    """Upsert groups from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         study = resolve_study(row.get('study_doi', ''), row.get('study_title', ''))
         if not study:
             continue
-        group = Group.objects.filter(study=study, name=row['name']).first()
-        if group:
-            continue
-        Group.objects.create(
+        Group.objects.update_or_create(
             study=study,
             name=row['name'],
-            condition=row['condition'],
-            sample_size=row['sample_size'],
-            cohort=row['cohort'],
-            site=row['site'],
-            notes=row['notes'],
+            defaults={
+                'condition': row['condition'],
+                'sample_size': row['sample_size'],
+                'cohort': row['cohort'],
+                'site': row['site'],
+                'notes': row['notes'],
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_comparison_import(valid_rows, batch):
-    """Create missing comparisons from workbook preview rows."""
-    created_count = 0
+    """Upsert comparisons from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         study = resolve_study(row.get('study_doi', ''), row.get('study_title', ''))
         group_a = resolve_group(row.get('study_doi', ''), row.get('study_title', ''), row['group_a_name'])
         group_b = resolve_group(row.get('study_doi', ''), row.get('study_title', ''), row['group_b_name'])
         if not study or not group_a or not group_b:
             continue
-        comparison = Comparison.objects.filter(
+        Comparison.objects.update_or_create(
             study=study,
             group_a=group_a,
             group_b=group_b,
             label=row['label'],
-        ).first()
-        if comparison:
-            continue
-        Comparison.objects.create(
-            study=study,
-            group_a=group_a,
-            group_b=group_b,
-            label=row['label'],
-            notes=row['notes'],
+            defaults={
+                'notes': row['notes'],
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_organism_import(valid_rows, batch):
-    """Create missing organisms from workbook preview rows."""
-    created_count = 0
+    """Upsert organisms from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         organism = resolve_organism(row['scientific_name'], row['ncbi_taxonomy_id'])
         if organism:
-            continue
-        Organism.objects.create(
-            ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
-            scientific_name=row['scientific_name'],
-            rank=row['rank'],
-            notes=row['notes'],
-        )
-        created_count += 1
-    return created_count
+            organism.ncbi_taxonomy_id = row['ncbi_taxonomy_id']
+            organism.scientific_name = row['scientific_name']
+            organism.rank = row['rank']
+            organism.notes = row['notes']
+            organism.save(update_fields=['ncbi_taxonomy_id', 'scientific_name', 'rank', 'notes', 'updated_at'])
+        else:
+            Organism.objects.create(
+                ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
+                scientific_name=row['scientific_name'],
+                rank=row['rank'],
+                notes=row['notes'],
+            )
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_metadata_variable_import(valid_rows, batch):
-    """Create missing metadata variables from workbook preview rows."""
-    created_count = 0
+    """Upsert metadata variables from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
-        variable = MetadataVariable.objects.filter(name=row['name']).first()
-        if variable:
-            continue
-        MetadataVariable.objects.create(
+        MetadataVariable.objects.update_or_create(
             name=row['name'],
-            display_name=row['display_name'],
-            value_type=row['value_type'],
-            is_filterable=row['is_filterable'],
+            defaults={
+                'display_name': row['display_name'],
+                'value_type': row['value_type'],
+                'is_filterable': row['is_filterable'],
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_metadata_value_import(valid_rows, batch):
-    """Create missing metadata values from workbook preview rows."""
-    created_count = 0
+    """Upsert metadata values from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         group = resolve_group(row.get('study_doi', ''), row.get('study_title', ''), row['group_name'])
         variable = MetadataVariable.objects.filter(name=row['variable_name']).first()
         if not group or not variable:
             continue
-        value = MetadataValue.objects.filter(group=group, variable=variable).first()
-        if value:
-            continue
-        MetadataValue.objects.create(
+        MetadataValue.objects.update_or_create(
             group=group,
             variable=variable,
-            value_float=row.get('value_float'),
-            value_int=row.get('value_int'),
-            value_text=row.get('value_text'),
-            value_bool=row.get('value_bool'),
+            defaults={
+                'value_float': row.get('value_float'),
+                'value_int': row.get('value_int'),
+                'value_text': row.get('value_text'),
+                'value_bool': row.get('value_bool'),
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_qualitative_finding_import(valid_rows, batch):
-    """Create qualitative findings from workbook preview rows."""
-    created_count = 0
+    """Upsert qualitative findings from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         comparison = resolve_comparison(
             row.get('study_doi', ''),
@@ -207,29 +210,23 @@ def run_workbook_qualitative_finding_import(valid_rows, batch):
         )
         if not comparison or not organism:
             continue
-        finding = QualitativeFinding.objects.filter(
+        QualitativeFinding.objects.update_or_create(
             comparison=comparison,
             organism=organism,
             direction=row['direction'],
             source=row['source'],
-        ).first()
-        if finding:
-            continue
-        QualitativeFinding.objects.create(
-            comparison=comparison,
-            organism=organism,
-            direction=row['direction'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
+            defaults={
+                'notes': row['notes'],
+                'import_batch': batch,
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_quantitative_finding_import(valid_rows, batch):
-    """Create quantitative findings from workbook preview rows."""
-    created_count = 0
+    """Upsert quantitative findings from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         group = resolve_group(row.get('study_doi', ''), row.get('study_title', ''), row['group_name'])
         organism = resolve_organism(
@@ -238,53 +235,46 @@ def run_workbook_quantitative_finding_import(valid_rows, batch):
         )
         if not group or not organism:
             continue
-        finding = QuantitativeFinding.objects.filter(
+        QuantitativeFinding.objects.update_or_create(
             group=group,
             organism=organism,
             value_type=row['value_type'],
             source=row['source'],
-        ).first()
-        if finding:
-            continue
-        QuantitativeFinding.objects.create(
-            group=group,
-            organism=organism,
-            value_type=row['value_type'],
-            value=row['value'],
-            unit=row['unit'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
+            defaults={
+                'value': row['value'],
+                'unit': row['unit'],
+                'notes': row['notes'],
+                'import_batch': batch,
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_alpha_metric_import(valid_rows, batch):
-    """Create alpha metrics from workbook preview rows."""
-    created_count = 0
+    """Upsert alpha metrics from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         group = resolve_group(row.get('study_doi', ''), row.get('study_title', ''), row['group_name'])
         if not group:
             continue
-        metric = AlphaMetric.objects.filter(group=group, metric=row['metric'], source=row['source']).first()
-        if metric:
-            continue
-        AlphaMetric.objects.create(
+        AlphaMetric.objects.update_or_create(
             group=group,
             metric=row['metric'],
-            value=row['value'],
             source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
+            defaults={
+                'value': row['value'],
+                'notes': row['notes'],
+                'import_batch': batch,
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 def run_workbook_beta_metric_import(valid_rows, batch):
-    """Create beta metrics from workbook preview rows."""
-    created_count = 0
+    """Upsert beta metrics from workbook preview rows."""
+    applied_count = 0
     for row in valid_rows:
         comparison = resolve_comparison(
             row.get('study_doi', ''),
@@ -295,23 +285,18 @@ def run_workbook_beta_metric_import(valid_rows, batch):
         )
         if not comparison:
             continue
-        metric = BetaMetric.objects.filter(
+        BetaMetric.objects.update_or_create(
             comparison=comparison,
             metric=row['metric'],
             source=row['source'],
-        ).first()
-        if metric:
-            continue
-        BetaMetric.objects.create(
-            comparison=comparison,
-            metric=row['metric'],
-            value=row['value'],
-            source=row['source'],
-            notes=row['notes'],
-            import_batch=batch,
+            defaults={
+                'value': row['value'],
+                'notes': row['notes'],
+                'import_batch': batch,
+            },
         )
-        created_count += 1
-    return created_count
+        applied_count += 1
+    return applied_count
 
 
 WORKBOOK_IMPORT_RUNNERS = {

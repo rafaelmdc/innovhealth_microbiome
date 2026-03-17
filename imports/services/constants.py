@@ -29,6 +29,19 @@ WORKBOOK_SHEET_ORDER = (
     'organisms',
     'extra_metadata',
 )
+WORKBOOK_SHEET_ALIASES = {
+    'paper': 'paper',
+    'papers': 'paper',
+    'groups': 'groups',
+    'comparisons': 'comparissons',
+    'comparissons': 'comparissons',
+    'qualitative_findings': 'qualitative_findings',
+    'quantitative_findings': 'quantitative_findings',
+    'quantitive_findings': 'quantitative_findings',
+    'diversity_metrics': 'diversity_metrics',
+    'organisms': 'organisms',
+    'extra_metadata': 'extra_metadata',
+}
 PAPER_STATUS_ALLOWED_VALUES = {'todo', 'in_progress', 'complete', 'needs_review'}
 GROUP_TYPE_ALLOWED_VALUES = {
     'case',
@@ -63,11 +76,11 @@ WORKBOOK_METADATA_FIELD_DEFINITIONS = {
     },
     'age': {
         'display_name': 'Age',
-        'value_type': MetadataVariable.ValueType.FLOAT,
+        'value_type': MetadataVariable.ValueType.TEXT,
     },
     'women_percent': {
         'display_name': 'Women Percent',
-        'value_type': MetadataVariable.ValueType.FLOAT,
+        'value_type': MetadataVariable.ValueType.TEXT,
     },
     'age2': {
         'display_name': 'Age 2',

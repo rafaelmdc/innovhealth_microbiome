@@ -1,11 +1,8 @@
 """Workbook preview builders for core sheets and diversity metrics."""
 
-from database.models import AlphaMetric, BetaMetric, Comparison, Group, Organism, QualitativeFinding, QuantitativeFinding, Study
-
 from .constants import (
     COMPARISON_TYPE_ALLOWED_VALUES,
     GROUP_TYPE_ALLOWED_VALUES,
-    PAPER_STATUS_ALLOWED_VALUES,
     WORKBOOK_DIRECTION_ALLOWED_VALUES,
     WORKBOOK_DIRECTION_MAP,
     WORKBOOK_DIVERSITY_ALLOWED_VALUES,
@@ -18,10 +15,9 @@ from .helpers import (
     combine_note_parts,
     labeled_note,
     parse_float,
+    parse_optional_bool,
     parse_optional_int,
-    resolve_comparison,
-    resolve_group,
-    resolve_organism,
+    split_source_and_notes,
 )
 from .workbook_common import build_section_preview, missing_columns_error
 
@@ -33,8 +29,6 @@ def build_paper_section(*, sheet, batch_name, file_name, state):
     if fatal_error:
         return {'fatal_error': fatal_error}
 
-    existing_study_dois = set(Study.objects.exclude(doi__isnull=True).exclude(doi='').values_list('doi', flat=True))
-    existing_study_titles = {title.lower() for title in Study.objects.values_list('title', flat=True)}
     seen_study_keys = set()
     paper_ids_seen = set()
     valid_rows = []
@@ -59,14 +53,6 @@ def build_paper_section(*, sheet, batch_name, file_name, state):
 
         if not title:
             errors.append({'row_number': row_number, 'message': 'title is required.'})
-            continue
-        if status not in PAPER_STATUS_ALLOWED_VALUES:
-            errors.append(
-                {
-                    'row_number': row_number,
-                    'message': 'status must be one of: todo, in_progress, complete, needs_review.',
-                }
-            )
             continue
         if status != 'complete':
             state['skipped_rows'].append(
@@ -99,9 +85,6 @@ def build_paper_section(*, sheet, batch_name, file_name, state):
 
         if study_key in seen_study_keys:
             duplicates.append({'row_number': row_number, 'message': 'Duplicate study in workbook.'})
-            continue
-        if (doi and doi in existing_study_dois) or (not doi and title.lower() in existing_study_titles):
-            duplicates.append({'row_number': row_number, 'message': 'Study already exists.'})
             continue
 
         seen_study_keys.add(study_key)
@@ -137,7 +120,6 @@ def build_group_section(*, sheet, batch_name, file_name, state):
     duplicates = []
     group_ids_seen = set()
     seen_group_keys = set()
-    existing_group_keys = set(Group.objects.values_list('study_id', 'name'))
 
     missing_columns = missing_columns_error(required_columns, sheet['fieldnames'])
     if missing_columns and sheet['rows']:
@@ -195,11 +177,6 @@ def build_group_section(*, sheet, batch_name, file_name, state):
                 errors.append({'row_number': row_number, 'message': sample_size_error})
                 continue
 
-            existing_group = resolve_group(
-                paper_ref['study_doi'],
-                paper_ref['study_title'],
-                group_name,
-            )
             group_key = (paper_ref['study_doi'], paper_ref['study_title'], group_name)
             state['group_refs'][group_id] = {
                 'study_doi': paper_ref['study_doi'],
@@ -214,9 +191,6 @@ def build_group_section(*, sheet, batch_name, file_name, state):
 
             if group_key in seen_group_keys:
                 duplicates.append({'row_number': row_number, 'message': 'Duplicate group in workbook.'})
-                continue
-            if existing_group and (existing_group.study_id, existing_group.name) in existing_group_keys:
-                duplicates.append({'row_number': row_number, 'message': 'Group already exists.'})
                 continue
 
             seen_group_keys.add(group_key)
@@ -258,6 +232,8 @@ def collect_group_metadata_rows(*, row_number, paper_ref, group_name, data, stat
     """Extract predefined group-side workbook fields into raw metadata rows."""
     for metadata_name in ('group_type', 'age', 'women_percent', 'age2'):
         raw_value = data.get(metadata_name, '')
+        if not raw_value and metadata_name in {'age', 'women_percent'}:
+            raw_value = 'NA'
         if not raw_value:
             continue
         definition = WORKBOOK_METADATA_FIELD_DEFINITIONS[metadata_name]
@@ -283,7 +259,6 @@ def build_comparison_section(*, sheet, batch_name, file_name, state):
     duplicates = []
     comparison_ids_seen = set()
     seen_comparison_keys = set()
-    existing_comparison_keys = set(Comparison.objects.values_list('study_id', 'group_a_id', 'group_b_id', 'label'))
 
     missing_columns = missing_columns_error(required_columns, sheet['fieldnames'])
     if missing_columns and sheet['rows']:
@@ -352,13 +327,6 @@ def build_comparison_section(*, sheet, batch_name, file_name, state):
                 'comparison_label': label,
             }
 
-            existing_comparison = resolve_comparison(
-                paper_ref['study_doi'],
-                paper_ref['study_title'],
-                target_group['group_name'],
-                reference_group['group_name'],
-                label,
-            )
             comparison_key = (
                 paper_ref['study_doi'],
                 paper_ref['study_title'],
@@ -375,14 +343,6 @@ def build_comparison_section(*, sheet, batch_name, file_name, state):
 
             if comparison_key in seen_comparison_keys:
                 duplicates.append({'row_number': row_number, 'message': 'Duplicate comparison in workbook.'})
-                continue
-            if existing_comparison and (
-                existing_comparison.study_id,
-                existing_comparison.group_a_id,
-                existing_comparison.group_b_id,
-                existing_comparison.label,
-            ) in existing_comparison_keys:
-                duplicates.append({'row_number': row_number, 'message': 'Comparison already exists.'})
                 continue
 
             seen_comparison_keys.add(comparison_key)
@@ -419,10 +379,6 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
     organism_ids_seen = set()
     seen_organism_names = set()
     seen_organism_taxonomy_ids = set()
-    existing_taxonomy_ids = set(
-        Organism.objects.exclude(ncbi_taxonomy_id__isnull=True).values_list('ncbi_taxonomy_id', flat=True)
-    )
-    existing_organism_names = {name.lower() for name in Organism.objects.values_list('scientific_name', flat=True)}
 
     missing_columns = missing_columns_error(required_columns, sheet['fieldnames'])
     if missing_columns and sheet['rows']:
@@ -432,6 +388,19 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
             row_number = row['row_number']
             data = cleaned_row(row['data'])
             organism_id = data.get('organism_id', '')
+            scientific_name = data.get('organism_as_written', '')
+
+            if not any(
+                [
+                    scientific_name,
+                    data.get('suggested_clean_name', ''),
+                    data.get('rank_if_known', ''),
+                    data.get('notes', ''),
+                    data.get('ncbi_id', ''),
+                    data.get('resolved', ''),
+                ]
+            ):
+                continue
 
             if not organism_id:
                 errors.append({'row_number': row_number, 'message': 'organism_id is required.'})
@@ -441,7 +410,6 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
                 continue
             organism_ids_seen.add(organism_id)
 
-            scientific_name = data.get('organism_as_written', '')
             if not scientific_name:
                 errors.append({'row_number': row_number, 'message': 'organism_as_written is required.'})
                 continue
@@ -449,6 +417,21 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
             ncbi_taxonomy_id, taxonomy_error = parse_optional_int(data.get('ncbi_id', ''), 'ncbi_id')
             if taxonomy_error:
                 errors.append({'row_number': row_number, 'message': taxonomy_error})
+                continue
+
+            is_resolved, resolved_error = parse_optional_bool(data.get('resolved', ''), 'resolved')
+            if resolved_error:
+                errors.append({'row_number': row_number, 'message': resolved_error})
+                continue
+            if is_resolved is not True:
+                state['unresolved_organism_ids'].add(organism_id)
+                state['skipped_rows'].append(
+                    {
+                        'section': 'organisms',
+                        'row_number': row_number,
+                        'message': f'Skipped because organism {organism_id} is not resolved.',
+                    }
+                )
                 continue
 
             state['organism_refs'][organism_id] = {
@@ -467,15 +450,9 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
                 if ncbi_taxonomy_id in seen_organism_taxonomy_ids:
                     duplicates.append({'row_number': row_number, 'message': 'Duplicate ncbi_id in workbook.'})
                     continue
-                if ncbi_taxonomy_id in existing_taxonomy_ids:
-                    duplicates.append({'row_number': row_number, 'message': 'Organism already exists for this ncbi_id.'})
-                    continue
                 seen_organism_taxonomy_ids.add(ncbi_taxonomy_id)
             elif duplicate_name_key in seen_organism_names:
                 duplicates.append({'row_number': row_number, 'message': 'Duplicate organism name in workbook.'})
-                continue
-            elif duplicate_name_key in existing_organism_names:
-                duplicates.append({'row_number': row_number, 'message': 'Organism already exists.'})
                 continue
 
             seen_organism_names.add(duplicate_name_key)
@@ -508,9 +485,6 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
     errors = []
     duplicates = []
     seen_qualitative_keys = set()
-    existing_qualitative_keys = set(
-        QualitativeFinding.objects.values_list('comparison_id', 'organism_id', 'direction', 'source')
-    )
 
     missing_columns = missing_columns_error(required_columns, sheet['fieldnames'])
     if missing_columns and sheet['rows']:
@@ -520,6 +494,7 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
             row_number = row['row_number']
             data = cleaned_row(row['data'])
             paper_id = data.get('paper_id', '')
+            organism_id = data.get('organism_id', '')
 
             if paper_id not in state['paper_status_by_id']:
                 errors.append({'row_number': row_number, 'message': 'paper_id does not exist in the paper sheet.'})
@@ -534,12 +509,22 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                 )
                 continue
 
+            if organism_id in state['unresolved_organism_ids']:
+                state['skipped_rows'].append(
+                    {
+                        'section': 'qualitative_findings',
+                        'row_number': row_number,
+                        'message': f'Skipped because organism {organism_id} is not resolved.',
+                    }
+                )
+                continue
+
             comparison_ref = state['comparison_refs'].get(data.get('comparison_id', ''))
             if not comparison_ref:
                 errors.append({'row_number': row_number, 'message': 'comparison_id does not resolve to a valid comparison.'})
                 continue
 
-            organism_ref = state['organism_refs'].get(data.get('organism_id', ''))
+            organism_ref = state['organism_refs'].get(organism_id)
             if not organism_ref:
                 errors.append({'row_number': row_number, 'message': 'organism_id does not resolve to a valid organism.'})
                 continue
@@ -559,16 +544,11 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                 errors.append({'row_number': row_number, 'message': 'finding_type must be relative_direction.'})
                 continue
 
-            existing_comparison = resolve_comparison(
-                comparison_ref['study_doi'],
-                comparison_ref['study_title'],
-                comparison_ref['group_a_name'],
-                comparison_ref['group_b_name'],
-                comparison_ref['comparison_label'],
-            )
-            existing_organism = resolve_organism(
-                organism_ref['scientific_name'],
-                organism_ref['ncbi_taxonomy_id'],
+            source, notes = split_source_and_notes(
+                data.get('where_found', ''),
+                data.get('notes', ''),
+                labeled_note('Finding type', finding_type),
+                labeled_note('Organism as written', data.get('organism_as_writiten', '')),
             )
             duplicate_key = (
                 comparison_ref['study_doi'],
@@ -578,20 +558,11 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                 comparison_ref['comparison_label'],
                 organism_ref['scientific_name'],
                 WORKBOOK_DIRECTION_MAP[direction],
-                data.get('where_found', ''),
+                source,
             )
             if duplicate_key in seen_qualitative_keys:
                 duplicates.append({'row_number': row_number, 'message': 'Duplicate qualitative finding in workbook.'})
                 continue
-            if existing_comparison and existing_organism and (
-                existing_comparison.pk,
-                existing_organism.pk,
-                WORKBOOK_DIRECTION_MAP[direction],
-                data.get('where_found', ''),
-            ) in existing_qualitative_keys:
-                duplicates.append({'row_number': row_number, 'message': 'Qualitative finding already exists.'})
-                continue
-
             seen_qualitative_keys.add(duplicate_key)
             valid_rows.append(
                 {
@@ -604,12 +575,8 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                     'organism_scientific_name': organism_ref['scientific_name'],
                     'organism_ncbi_taxonomy_id': organism_ref['ncbi_taxonomy_id'],
                     'direction': WORKBOOK_DIRECTION_MAP[direction],
-                    'source': data.get('where_found', ''),
-                    'notes': combine_note_parts(
-                        data.get('notes', ''),
-                        labeled_note('Finding type', finding_type),
-                        labeled_note('Organism as written', data.get('organism_as_writiten', '')),
-                    ),
+                    'source': source,
+                    'notes': notes,
                 }
             )
 
@@ -632,9 +599,6 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
     errors = []
     duplicates = []
     seen_quantitative_keys = set()
-    existing_quantitative_keys = set(
-        QuantitativeFinding.objects.values_list('group_id', 'organism_id', 'value_type', 'source')
-    )
 
     missing_columns = missing_columns_error(required_columns, sheet['fieldnames'])
     if missing_columns and sheet['rows']:
@@ -644,6 +608,7 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
             row_number = row['row_number']
             data = cleaned_row(row['data'])
             paper_id = data.get('paper_id', '')
+            organism_id = data.get('organism_id', '')
 
             if paper_id not in state['paper_status_by_id']:
                 errors.append({'row_number': row_number, 'message': 'paper_id does not exist in the paper sheet.'})
@@ -658,12 +623,22 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                 )
                 continue
 
+            if organism_id in state['unresolved_organism_ids']:
+                state['skipped_rows'].append(
+                    {
+                        'section': 'quantitative_findings',
+                        'row_number': row_number,
+                        'message': f'Skipped because organism {organism_id} is not resolved.',
+                    }
+                )
+                continue
+
             group_ref = state['group_refs'].get(data.get('group_id', ''))
             if not group_ref:
                 errors.append({'row_number': row_number, 'message': 'group_id does not resolve to a valid group.'})
                 continue
 
-            organism_ref = state['organism_refs'].get(data.get('organism_id', ''))
+            organism_ref = state['organism_refs'].get(organism_id)
             if not organism_ref:
                 errors.append({'row_number': row_number, 'message': 'organism_id does not resolve to a valid organism.'})
                 continue
@@ -678,14 +653,9 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                 errors.append({'row_number': row_number, 'message': value_error})
                 continue
 
-            existing_group = resolve_group(
-                group_ref['study_doi'],
-                group_ref['study_title'],
-                group_ref['group_name'],
-            )
-            existing_organism = resolve_organism(
-                organism_ref['scientific_name'],
-                organism_ref['ncbi_taxonomy_id'],
+            source, notes = split_source_and_notes(
+                data.get('where_found', ''),
+                data.get('notes', ''),
             )
             duplicate_key = (
                 group_ref['study_doi'],
@@ -693,20 +663,11 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                 group_ref['group_name'],
                 organism_ref['scientific_name'],
                 value_type,
-                data.get('where_found', ''),
+                source,
             )
             if duplicate_key in seen_quantitative_keys:
                 duplicates.append({'row_number': row_number, 'message': 'Duplicate quantitative finding in workbook.'})
                 continue
-            if existing_group and existing_organism and (
-                existing_group.pk,
-                existing_organism.pk,
-                value_type,
-                data.get('where_found', ''),
-            ) in existing_quantitative_keys:
-                duplicates.append({'row_number': row_number, 'message': 'Quantitative finding already exists.'})
-                continue
-
             seen_quantitative_keys.add(duplicate_key)
             valid_rows.append(
                 {
@@ -719,8 +680,8 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                     'value_type': value_type,
                     'value': value,
                     'unit': data.get('unit', ''),
-                    'source': data.get('where_found', ''),
-                    'notes': data.get('notes', ''),
+                    'source': source,
+                    'notes': notes,
                 }
             )
 
@@ -747,8 +708,6 @@ def build_diversity_sections(*, sheet, batch_name, file_name, state):
     beta_duplicates = []
     seen_alpha_keys = set()
     seen_beta_keys = set()
-    existing_alpha_keys = set(AlphaMetric.objects.values_list('group_id', 'metric', 'source'))
-    existing_beta_keys = set(BetaMetric.objects.values_list('comparison_id', 'metric', 'source'))
 
     missing_columns = missing_columns_error(required_columns, sheet['fieldnames'])
     if missing_columns and sheet['rows']:
@@ -757,6 +716,17 @@ def build_diversity_sections(*, sheet, batch_name, file_name, state):
         for row in sheet['rows']:
             row_number = row['row_number']
             data = cleaned_row(row['data'])
+            if not any(
+                [
+                    data.get('paper_id', ''),
+                    data.get('comparison_id', ''),
+                    data.get('group_id', ''),
+                    data.get('diversity_category', ''),
+                    data.get('metric_as_written', ''),
+                    data.get('value', ''),
+                ]
+            ):
+                continue
             paper_id = data.get('paper_id', '')
 
             if paper_id not in state['paper_status_by_id']:
@@ -787,8 +757,10 @@ def build_diversity_sections(*, sheet, batch_name, file_name, state):
                 alpha_errors.append({'row_number': row_number, 'message': 'metric_as_written is required.'})
                 continue
 
-            source = data.get('where_found', '')
-            notes = data.get('notes', '')
+            source, notes = split_source_and_notes(
+                data.get('where_found', ''),
+                data.get('notes', ''),
+            )
 
             if category == 'alpha':
                 handle_alpha_diversity_row(
@@ -803,7 +775,6 @@ def build_diversity_sections(*, sheet, batch_name, file_name, state):
                     errors=alpha_errors,
                     duplicates=alpha_duplicates,
                     seen_keys=seen_alpha_keys,
-                    existing_keys=existing_alpha_keys,
                 )
                 continue
 
@@ -819,7 +790,6 @@ def build_diversity_sections(*, sheet, batch_name, file_name, state):
                 errors=beta_errors,
                 duplicates=beta_duplicates,
                 seen_keys=seen_beta_keys,
-                existing_keys=existing_beta_keys,
             )
 
     alpha_section = build_section_preview(
@@ -845,18 +815,13 @@ def build_diversity_sections(*, sheet, batch_name, file_name, state):
     return [alpha_section, beta_section]
 
 
-def handle_alpha_diversity_row(*, row_number, data, metric, value, source, notes, state, valid_rows, errors, duplicates, seen_keys, existing_keys):
+def handle_alpha_diversity_row(*, row_number, data, metric, value, source, notes, state, valid_rows, errors, duplicates, seen_keys):
     """Validate and append a single alpha diversity row to the preview payload."""
     group_ref = state['group_refs'].get(data.get('group_id', ''))
     if not group_ref:
         errors.append({'row_number': row_number, 'message': 'Alpha diversity rows require a valid group_id.'})
         return
 
-    existing_group = resolve_group(
-        group_ref['study_doi'],
-        group_ref['study_title'],
-        group_ref['group_name'],
-    )
     duplicate_key = (
         group_ref['study_doi'],
         group_ref['study_title'],
@@ -866,9 +831,6 @@ def handle_alpha_diversity_row(*, row_number, data, metric, value, source, notes
     )
     if duplicate_key in seen_keys:
         duplicates.append({'row_number': row_number, 'message': 'Duplicate alpha metric in workbook.'})
-        return
-    if existing_group and (existing_group.pk, metric, source) in existing_keys:
-        duplicates.append({'row_number': row_number, 'message': 'Alpha metric already exists.'})
         return
 
     seen_keys.add(duplicate_key)
@@ -886,20 +848,13 @@ def handle_alpha_diversity_row(*, row_number, data, metric, value, source, notes
     )
 
 
-def handle_beta_diversity_row(*, row_number, data, metric, value, source, notes, state, valid_rows, errors, duplicates, seen_keys, existing_keys):
+def handle_beta_diversity_row(*, row_number, data, metric, value, source, notes, state, valid_rows, errors, duplicates, seen_keys):
     """Validate and append a single beta diversity row to the preview payload."""
     comparison_ref = state['comparison_refs'].get(data.get('comparison_id', ''))
     if not comparison_ref:
         errors.append({'row_number': row_number, 'message': 'Beta diversity rows require a valid comparison_id.'})
         return
 
-    existing_comparison = resolve_comparison(
-        comparison_ref['study_doi'],
-        comparison_ref['study_title'],
-        comparison_ref['group_a_name'],
-        comparison_ref['group_b_name'],
-        comparison_ref['comparison_label'],
-    )
     duplicate_key = (
         comparison_ref['study_doi'],
         comparison_ref['study_title'],
@@ -911,9 +866,6 @@ def handle_beta_diversity_row(*, row_number, data, metric, value, source, notes,
     )
     if duplicate_key in seen_keys:
         duplicates.append({'row_number': row_number, 'message': 'Duplicate beta metric in workbook.'})
-        return
-    if existing_comparison and (existing_comparison.pk, metric, source) in existing_keys:
-        duplicates.append({'row_number': row_number, 'message': 'Beta metric already exists.'})
         return
 
     seen_keys.add(duplicate_key)

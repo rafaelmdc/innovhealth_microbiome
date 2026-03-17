@@ -1,6 +1,6 @@
 """Workbook preview builders for extra metadata and metadata-derived sections."""
 
-from database.models import MetadataValue, MetadataVariable
+from database.models import MetadataVariable
 
 from .helpers import cleaned_row, parse_float, parse_int, parse_optional_bool
 from .workbook_common import build_section_preview, missing_columns_error
@@ -68,7 +68,6 @@ def build_metadata_sections(*, batch_name, file_name, state, extra_metadata_erro
     required_columns = ('paper_id', 'group_id', 'field_name', 'value_as_written')
     existing_variables = {variable.name: variable for variable in MetadataVariable.objects.all()}
     metadata_variable_valid_rows = []
-    metadata_variable_duplicates = []
     planned_variable_names = set()
     metadata_variable_types = {}
 
@@ -79,15 +78,8 @@ def build_metadata_sections(*, batch_name, file_name, state, extra_metadata_erro
         existing_variable = existing_variables.get(variable_name)
         if existing_variable:
             metadata_variable_types[variable_name] = existing_variable.value_type
-            metadata_variable_duplicates.append(
-                {
-                    'row_number': metadata_row['row_number'],
-                    'message': f'Metadata variable "{variable_name}" already exists.',
-                }
-            )
-            continue
-
-        metadata_variable_types[variable_name] = metadata_row['preferred_value_type']
+        else:
+            metadata_variable_types[variable_name] = metadata_row['preferred_value_type']
         if variable_name in planned_variable_names:
             continue
         planned_variable_names.add(variable_name)
@@ -96,7 +88,7 @@ def build_metadata_sections(*, batch_name, file_name, state, extra_metadata_erro
                 'row_number': metadata_row['row_number'],
                 'name': variable_name,
                 'display_name': metadata_row['display_name'],
-                'value_type': metadata_row['preferred_value_type'],
+                'value_type': metadata_variable_types[variable_name],
                 'is_filterable': False,
             }
         )
@@ -108,24 +100,14 @@ def build_metadata_sections(*, batch_name, file_name, state, extra_metadata_erro
         required_columns=required_columns,
         valid_rows=metadata_variable_valid_rows,
         errors=extra_metadata_errors,
-        duplicates=metadata_variable_duplicates,
-        total_rows=len(metadata_variable_valid_rows) + len(metadata_variable_duplicates),
+        duplicates=[],
+        total_rows=len(metadata_variable_valid_rows),
     )
 
     metadata_value_valid_rows = []
     metadata_value_errors = []
     metadata_value_duplicates = []
     seen_metadata_value_keys = set()
-    existing_metadata_value_keys = set()
-    for metadata_value in MetadataValue.objects.select_related('group', 'variable', 'group__study'):
-        existing_metadata_value_keys.add(
-            (
-                metadata_value.group.study.doi or '',
-                metadata_value.group.study.title,
-                metadata_value.group.name,
-                metadata_value.variable.name,
-            )
-        )
 
     for metadata_row in state['raw_metadata_values']:
         variable_type = metadata_variable_types.get(
@@ -157,14 +139,6 @@ def build_metadata_sections(*, batch_name, file_name, state, extra_metadata_erro
                 {
                     'row_number': metadata_row['row_number'],
                     'message': 'Duplicate metadata value in workbook.',
-                }
-            )
-            continue
-        if duplicate_key in existing_metadata_value_keys:
-            metadata_value_duplicates.append(
-                {
-                    'row_number': metadata_row['row_number'],
-                    'message': 'Metadata value already exists for this group and variable.',
                 }
             )
             continue

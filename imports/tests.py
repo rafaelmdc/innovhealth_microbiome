@@ -217,7 +217,7 @@ class ImportServiceTests(TestCase):
     def _build_workbook_bytes(self):
         workbook = Workbook()
         paper_sheet = workbook.active
-        paper_sheet.title = 'paper'
+        paper_sheet.title = 'Paper'
         paper_sheet.append(
             ['paper_id', 'doi', 'authors', 'year', 'title', 'country', 'topic', 'status', 'reviwer', 'notes']
         )
@@ -225,7 +225,7 @@ class ImportServiceTests(TestCase):
             ['paper-1', '10.2000/workbook', 'A. Author, B. Author', 2024, 'Workbook Study', 'Portugal', 'IBD', 'complete', 'Rafael', 'Paper note']
         )
         paper_sheet.append(
-            ['paper-2', '10.2000/skip', 'C. Author', 2023, 'Skipped Study', 'Spain', 'Control', 'needs_review', 'Rafael', 'Skip me']
+            ['paper-2', '10.2000/skip', 'C. Author', 2023, 'Skipped Study', 'Spain', 'Control', 'hold', 'Rafael', 'Skip me']
         )
 
         group_sheet = workbook.create_sheet('groups')
@@ -236,7 +236,7 @@ class ImportServiceTests(TestCase):
         group_sheet.append(['g2', 'paper-1', 'Controls', 'Healthy', 'control', 'gut', 10, 38, 55, '', 'Methods', 'Control group'])
         group_sheet.append(['g3', 'paper-2', 'Skipped Group', 'Other', 'other', 'gut', 5, '', '', '', '', 'Should skip'])
 
-        comparison_sheet = workbook.create_sheet('comparissons')
+        comparison_sheet = workbook.create_sheet('comparisons')
         comparison_sheet.append(
             ['comparison_id', 'paper_id', 'target_group_id', 'reference_group_id', 'target_condition', 'reference_condition', 'comparison_type', 'notes']
         )
@@ -248,7 +248,7 @@ class ImportServiceTests(TestCase):
         )
         qualitative_sheet.append(['f1', 'paper-1', 'c1', 'o1', 'Blautia sp.', 'increased_in_target', 'relative_direction', 'Table 2', 'Finding note'])
 
-        quantitative_sheet = workbook.create_sheet('quantitative_findings')
+        quantitative_sheet = workbook.create_sheet('quantitive_findings')
         quantitative_sheet.append(
             ['quant_finding_id', 'paper_id', 'group_id', 'organism_id', 'value_type', 'unit', 'value', 'where_found', 'notes']
         )
@@ -265,7 +265,7 @@ class ImportServiceTests(TestCase):
         organism_sheet.append(
             ['organism_id', 'organism_as_written', 'suggested_clean_name', 'rank_if_known', 'notes', 'ncbi_id', 'resolved']
         )
-        organism_sheet.append(['o1', 'Blautia sp.', 'Blautia', 'genus', 'Organism note', 1234, 'false'])
+        organism_sheet.append(['o1', 'Blautia sp.', 'Blautia', 'genus', 'Organism note', 1234, 'true'])
 
         metadata_sheet = workbook.create_sheet('extra_metadata')
         metadata_sheet.append(['paper_id', 'group_id', 'field_name', 'value_as_written', 'unit', 'where_found', 'notes'])
@@ -309,6 +309,8 @@ class ImportServiceTests(TestCase):
         bmi_value = MetadataValue.objects.get(group=cases, variable=bmi_variable)
         age_variable = MetadataVariable.objects.get(name='age')
         age_value = MetadataValue.objects.get(group=cases, variable=age_variable)
+        women_variable = MetadataVariable.objects.get(name='women_percent')
+        women_value = MetadataValue.objects.get(group=cases, variable=women_variable)
 
         self.assertIn('Authors: A. Author, B. Author', study.notes)
         self.assertEqual(qualitative.direction, QualitativeFinding.Direction.ENRICHED)
@@ -318,9 +320,205 @@ class ImportServiceTests(TestCase):
         self.assertEqual(beta.import_batch, batch)
         self.assertEqual(bmi_variable.value_type, MetadataVariable.ValueType.TEXT)
         self.assertEqual(bmi_value.value_text, '24.5')
-        self.assertEqual(age_variable.value_type, MetadataVariable.ValueType.FLOAT)
-        self.assertEqual(age_value.value_float, 40.5)
+        self.assertEqual(age_variable.value_type, MetadataVariable.ValueType.TEXT)
+        self.assertEqual(age_value.value_text, '40.5')
+        self.assertEqual(women_variable.value_type, MetadataVariable.ValueType.TEXT)
+        self.assertEqual(women_value.value_text, '60')
         self.assertFalse(Study.objects.filter(doi='10.2000/skip').exists())
+
+    def test_excel_workbook_aliases_skip_unresolved_and_upsert_records(self):
+        study = Study.objects.create(
+            doi='10.4000/upsert',
+            title='Workbook Alias Study',
+            country='Old Country',
+            notes='Old study note',
+        )
+        cases = Group.objects.create(study=study, name='Cases', notes='Old case note')
+        controls = Group.objects.create(study=study, name='Controls', notes='Old control note')
+        comparison = Comparison.objects.create(
+            study=study,
+            group_a=cases,
+            group_b=controls,
+            label='Cases vs Controls (case_vs_control)',
+            notes='Old comparison note',
+        )
+        organism = Organism.objects.create(
+            ncbi_taxonomy_id=2222,
+            scientific_name='Resolved Taxon',
+            rank='old_rank',
+            notes='Old organism note',
+        )
+        QuantitativeFinding.objects.create(
+            group=cases,
+            organism=organism,
+            value_type=QuantitativeFinding.ValueType.RELATIVE_ABUNDANCE,
+            value=0.1,
+            unit='%',
+            source='Table 3',
+            notes='Old quantitative note',
+        )
+
+        workbook = Workbook()
+        paper_sheet = workbook.active
+        paper_sheet.title = 'Paper'
+        paper_sheet.append(['paper_id', 'doi', 'authors', 'year', 'title', 'country', 'topic', 'status', 'reviwer', 'notes'])
+        paper_sheet.append(['paper-1', '10.4000/upsert', 'A. Author', 2024, 'Workbook Alias Study', 'Portugal', 'IBD', 'complete', 'Rafael', 'Updated study note'])
+        paper_sheet.append(['paper-2', '10.4000/skip', 'B. Author', 2024, 'Skipped Alias Study', 'Spain', 'IBD', 'to review', 'Rafael', 'Should skip'])
+
+        group_sheet = workbook.create_sheet('groups')
+        group_sheet.append(['group_id', 'paper_id', 'group_name_as_written', 'condition', 'group_type', 'body_site', 'sample_size', 'age', 'women_percent', 'age2', 'where_found', 'notes'])
+        group_sheet.append(['g1', 'paper-1', 'Cases', 'IBD', 'case', 'gut', 12, 40.5, 60, '', 'Methods', 'Updated case note'])
+        group_sheet.append(['g2', 'paper-1', 'Controls', 'Healthy', 'control', 'gut', 10, 55, 55, '', 'Methods', 'Updated control note'])
+        group_sheet.append(['g3', 'paper-2', 'Skipped Group', 'Other', 'other', 'gut', 5, '', '', '', '', 'Should skip'])
+
+        comparison_sheet = workbook.create_sheet('comparisons')
+        comparison_sheet.append(['comparison_id', 'paper_id', 'target_group_id', 'reference_group_id', 'comparison_type', 'notes'])
+        comparison_sheet.append(['c1', 'paper-1', 'g1', 'g2', 'case_vs_control', 'Updated comparison note'])
+
+        qualitative_sheet = workbook.create_sheet('qualitative_findings')
+        qualitative_sheet.append(['finding_id', 'paper_id', 'comparison_id', 'organism_id', 'organism_as_writiten', 'direction', 'finding_type', 'where_found', 'notes'])
+        qualitative_sheet.append(['f1', 'paper-1', 'c1', 'o1', 'Resolved Taxon', 'increased_in_target', 'relative_direction', 'Table 2', 'Updated qualitative note'])
+        qualitative_sheet.append(['f2', 'paper-1', 'c1', 'o2', 'Unresolved Taxon', 'decreased_in_target', 'relative_direction', 'Table 5', 'Should skip'])
+
+        quantitative_sheet = workbook.create_sheet('quantitive_findings')
+        quantitative_sheet.append(['quant_finding_id', 'paper_id', 'group_id', 'organism_id', 'value_type', 'unit', 'value', 'where_found', 'notes'])
+        quantitative_sheet.append(['q1', 'paper-1', 'g1', 'o1', 'relative_abundance', '%', 0.42, 'Table 3', 'Updated quantitative note'])
+        quantitative_sheet.append(['q2', 'paper-1', 'g1', 'o2', 'relative_abundance', '%', 0.33, 'Table 4', 'Should skip'])
+
+        organism_sheet = workbook.create_sheet('organisms')
+        organism_sheet.append(['organism_id', 'organism_as_written', 'suggested_clean_name', 'rank_if_known', 'notes', 'ncbi_id', 'resolved'])
+        organism_sheet.append(['1', '', '', '', '', '', ''])
+        organism_sheet.append(['o1', 'Resolved Taxon', 'Resolved Taxon', 'species', 'Updated organism note', 2222, 'true'])
+        organism_sheet.append(['o2', 'Unresolved Taxon', '', '', 'No match', '', 'false'])
+
+        output = BytesIO()
+        workbook.save(output)
+
+        preview = build_preview(
+            file_name='alias_workbook.xlsx',
+            content=output.getvalue(),
+            import_type='excel_workbook',
+            batch_name='Alias workbook batch',
+        )
+
+        self.assertEqual(preview.import_type, 'excel_workbook')
+        self.assertEqual(preview.errors, [])
+        self.assertEqual(preview.duplicates, [])
+        self.assertTrue(any('paper.status is "to review"' in row['message'] for row in preview.skipped_rows))
+        self.assertTrue(any('organism o2 is not resolved' in row['message'] for row in preview.skipped_rows))
+
+        batch = run_import(preview.to_dict())
+
+        study.refresh_from_db()
+        cases.refresh_from_db()
+        comparison.refresh_from_db()
+        organism.refresh_from_db()
+        quantitative = QuantitativeFinding.objects.get(group=cases, organism=organism, source='Table 3')
+        qualitative = QualitativeFinding.objects.get(comparison=comparison, organism=organism, source='Table 2')
+
+        self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
+        self.assertEqual(study.country, 'Portugal')
+        self.assertIn('Updated study note', study.notes)
+        self.assertEqual(cases.notes, 'Updated case note\nWhere found: Methods')
+        self.assertIn('Updated comparison note', comparison.notes)
+        self.assertEqual(organism.rank, 'species')
+        self.assertIn('Updated organism note', organism.notes)
+        self.assertEqual(quantitative.value, 0.42)
+        self.assertEqual(quantitative.import_batch, batch)
+        self.assertEqual(qualitative.import_batch, batch)
+        self.assertFalse(Organism.objects.filter(scientific_name='Unresolved Taxon').exists())
+
+    def test_excel_workbook_missing_age_and_women_percent_are_imported_as_na(self):
+        workbook = Workbook()
+        paper_sheet = workbook.active
+        paper_sheet.title = 'Paper'
+        paper_sheet.append(['paper_id', 'doi', 'authors', 'year', 'title', 'country', 'topic', 'status', 'reviwer', 'notes'])
+        paper_sheet.append(['paper-1', '10.5000/na', 'A. Author', 2024, 'NA Workbook Study', 'Portugal', 'IBD', 'complete', 'Rafael', ''])
+
+        group_sheet = workbook.create_sheet('groups')
+        group_sheet.append(['group_id', 'paper_id', 'group_name_as_written', 'condition', 'group_type', 'body_site', 'sample_size', 'age', 'women_percent', 'age2', 'where_found', 'notes'])
+        group_sheet.append(['g1', 'paper-1', 'Cases', 'IBD', 'case', 'gut', 12, '', '', '', 'Methods', ''])
+
+        output = BytesIO()
+        workbook.save(output)
+
+        preview = build_preview(
+            file_name='na_workbook.xlsx',
+            content=output.getvalue(),
+            import_type='excel_workbook',
+            batch_name='NA workbook batch',
+        )
+
+        self.assertEqual(preview.errors, [])
+
+        batch = run_import(preview.to_dict())
+        study = Study.objects.get(doi='10.5000/na')
+        group = Group.objects.get(study=study, name='Cases')
+        age_variable = MetadataVariable.objects.get(name='age')
+        women_variable = MetadataVariable.objects.get(name='women_percent')
+        age_value = MetadataValue.objects.get(group=group, variable=age_variable)
+        women_value = MetadataValue.objects.get(group=group, variable=women_variable)
+
+        self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
+        self.assertEqual(age_variable.value_type, MetadataVariable.ValueType.TEXT)
+        self.assertEqual(women_variable.value_type, MetadataVariable.ValueType.TEXT)
+        self.assertEqual(age_value.value_text, 'NA')
+        self.assertEqual(women_value.value_text, 'NA')
+
+    def test_excel_workbook_long_where_found_is_moved_to_notes(self):
+        workbook = Workbook()
+        paper_sheet = workbook.active
+        paper_sheet.title = 'Paper'
+        paper_sheet.append(['paper_id', 'doi', 'authors', 'year', 'title', 'country', 'topic', 'status', 'reviwer', 'notes'])
+        paper_sheet.append(['paper-1', '10.6000/source', 'A. Author', 2024, 'Long Source Study', 'Portugal', 'IBD', 'complete', 'Rafael', ''])
+
+        group_sheet = workbook.create_sheet('groups')
+        group_sheet.append(['group_id', 'paper_id', 'group_name_as_written', 'condition', 'group_type', 'body_site', 'sample_size', 'age', 'women_percent', 'age2', 'where_found', 'notes'])
+        group_sheet.append(['g1', 'paper-1', 'Cases', 'IBD', 'case', 'gut', 12, '', '', '', 'Methods', ''])
+        group_sheet.append(['g2', 'paper-1', 'Controls', 'Healthy', 'control', 'gut', 10, '', '', '', 'Methods', ''])
+
+        comparison_sheet = workbook.create_sheet('comparisons')
+        comparison_sheet.append(['comparison_id', 'paper_id', 'target_group_id', 'reference_group_id', 'comparison_type', 'notes'])
+        comparison_sheet.append(['c1', 'paper-1', 'g1', 'g2', 'case_vs_control', ''])
+
+        organism_sheet = workbook.create_sheet('organisms')
+        organism_sheet.append(['organism_id', 'organism_as_written', 'suggested_clean_name', 'rank_if_known', 'notes', 'ncbi_id', 'resolved'])
+        organism_sheet.append(['o1', 'Bacteroidaceae', 'Bacteroidaceae', 'family', '', 815, 'true'])
+
+        qualitative_sheet = workbook.create_sheet('qualitative_findings')
+        qualitative_sheet.append(['finding_id', 'paper_id', 'comparison_id', 'organism_id', 'organism_as_writiten', 'direction', 'finding_type', 'where_found', 'notes'])
+        long_source = 'X' * 300
+        qualitative_sheet.append(['f1', 'paper-1', 'c1', 'o1', 'Bacteroidaceae', 'increased_in_target', 'relative_direction', long_source, 'Finding note'])
+
+        output = BytesIO()
+        workbook.save(output)
+
+        preview = build_preview(
+            file_name='long_source.xlsx',
+            content=output.getvalue(),
+            import_type='excel_workbook',
+            batch_name='Long source batch',
+        )
+
+        self.assertEqual(preview.errors, [])
+
+        batch = run_import(preview.to_dict())
+        study = Study.objects.get(doi='10.6000/source')
+        cases = Group.objects.get(study=study, name='Cases')
+        controls = Group.objects.get(study=study, name='Controls')
+        comparison = Comparison.objects.get(
+            study=study,
+            group_a=cases,
+            group_b=controls,
+            label='Cases vs Controls (case_vs_control)',
+        )
+        organism = Organism.objects.get(scientific_name='Bacteroidaceae')
+        finding = QualitativeFinding.objects.get(comparison=comparison, organism=organism)
+
+        self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
+        self.assertEqual(len(finding.source), 255)
+        self.assertIn('Where found:', finding.notes)
+        self.assertIn(long_source, finding.notes)
 
     def test_excel_workbook_preview_reports_missing_group_reference(self):
         workbook = Workbook()

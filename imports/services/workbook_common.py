@@ -11,6 +11,7 @@ def build_workbook_state():
         'group_refs': {},
         'comparison_refs': {},
         'organism_refs': {},
+        'unresolved_organism_ids': set(),
         'raw_metadata_values': [],
         'skipped_rows': [],
     }
