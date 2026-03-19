@@ -10,8 +10,8 @@ def build_workbook_state():
         'complete_paper_refs': {},
         'group_refs': {},
         'comparison_refs': {},
-        'organism_refs': {},
-        'unresolved_organism_ids': set(),
+        'taxon_refs': {},
+        'unresolved_taxon_ids': set(),
         'raw_metadata_values': [],
         'skipped_rows': [],
     }

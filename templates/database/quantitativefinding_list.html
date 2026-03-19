@@ -17,7 +17,7 @@
   <div class="row g-3">
     <div class="col-md-4">
       <label class="form-label" for="id_q">Search</label>
-      <input class="form-control" id="id_q" type="text" name="q" value="{{ current_query }}" placeholder="Group, study, organism, source">
+      <input class="form-control" id="id_q" type="text" name="q" value="{{ current_query }}" placeholder="Group, study, taxon, source">
     </div>
     <div class="col-md-3">
       <label class="form-label" for="id_study">Study</label>
@@ -60,7 +60,7 @@
         <tr>
           <th><a href="{% querystring order_by='group' page='' %}">Group</a></th>
           <th>Study</th>
-          <th><a href="{% querystring order_by='organism' page='' %}">Organism</a></th>
+          <th><a href="{% querystring order_by='taxon' page='' %}">Taxon</a></th>
           <th>Value Type</th>
           <th><a href="{% querystring order_by='value' page='' %}">Value</a></th>
           <th>Source</th>
@@ -71,7 +71,7 @@
           <tr>
             <td><a href="{% url 'database:quantitativefinding-detail' finding.pk %}">{{ finding.group.name }}</a></td>
             <td><a href="{% url 'database:study-detail' finding.group.study.pk %}">{{ finding.group.study.title }}</a></td>
-            <td>{{ finding.organism.scientific_name }}</td>
+            <td>{{ finding.taxon.scientific_name }}</td>
             <td>{{ finding.get_value_type_display }}</td>
             <td>{{ finding.value }}</td>
             <td>{{ finding.source }}</td>

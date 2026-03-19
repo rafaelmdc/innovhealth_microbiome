@@ -5,7 +5,7 @@ class CsvImportUploadForm(forms.Form):
     SOURCE_FORMAT_CSV = 'csv'
     SOURCE_FORMAT_WORKBOOK = 'excel_workbook'
 
-    IMPORT_TYPE_ORGANISM = 'organism'
+    IMPORT_TYPE_TAXON = 'taxon'
     IMPORT_TYPE_STUDY = 'study'
     IMPORT_TYPE_GROUP = 'group'
     IMPORT_TYPE_COMPARISON = 'comparison'
@@ -17,7 +17,7 @@ class CsvImportUploadForm(forms.Form):
     IMPORT_TYPE_BETA_METRIC = 'beta_metric'
 
     IMPORT_TYPE_CHOICES = (
-        (IMPORT_TYPE_ORGANISM, 'Organisms'),
+        (IMPORT_TYPE_TAXON, 'Taxa'),
         (IMPORT_TYPE_STUDY, 'Studies'),
         (IMPORT_TYPE_GROUP, 'Groups'),
         (IMPORT_TYPE_COMPARISON, 'Comparisons'),

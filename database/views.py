@@ -4,10 +4,11 @@ from django.views.generic import DetailView, ListView, TemplateView
 from .models import (
     Comparison,
     Group,
-    Organism,
     QualitativeFinding,
     QuantitativeFinding,
     Study,
+    Taxon,
+    TaxonClosure,
 )
 
 
@@ -81,10 +82,10 @@ class BrowserHomeView(TemplateView):
                 'url_name': 'database:comparison-list',
             },
             {
-                'title': 'Organisms',
-                'count': Organism.objects.count(),
-                'description': 'Search taxa by name, rank, or taxonomy identifier.',
-                'url_name': 'database:organism-list',
+                'title': 'Taxa',
+                'count': Taxon.objects.count(),
+                'description': 'Search taxa by name, rank, lineage branch, or taxonomy identifier.',
+                'url_name': 'database:taxon-list',
             },
             {
                 'title': 'Qualitative Findings',
@@ -201,7 +202,7 @@ class GroupDetailView(DetailView):
             Group.objects.select_related('study')
             .prefetch_related(
                 'metadata_values__variable',
-                'quantitative_findings__organism',
+                'quantitative_findings__taxon',
                 'alpha_metrics',
                 'comparisons_as_a__group_b',
                 'comparisons_as_b__group_a',
@@ -258,14 +259,14 @@ class ComparisonDetailView(DetailView):
     def get_queryset(self):
         return (
             Comparison.objects.select_related('study', 'group_a', 'group_b')
-            .prefetch_related('qualitative_findings__organism', 'beta_metrics')
+            .prefetch_related('qualitative_findings__taxon', 'beta_metrics')
         )
 
 
-class OrganismListView(BrowserListView):
-    model = Organism
+class TaxonListView(BrowserListView):
+    model = Taxon
     template_name = 'database/organism_list.html'
-    context_object_name = 'organisms'
+    context_object_name = 'taxa'
     search_fields = ('scientific_name', 'rank')
     ordering_map = {
         'scientific_name': ('scientific_name',),
@@ -279,31 +280,43 @@ class OrganismListView(BrowserListView):
 
     def apply_filters(self, queryset):
         rank = self.request.GET.get('rank', '').strip()
+        branch_id = self.request.GET.get('branch', '').strip()
         if rank:
             queryset = queryset.filter(rank=rank)
+        if branch_id:
+            queryset = queryset.filter(
+                closure_ancestors__ancestor_id=branch_id,
+            ).distinct()
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['current_rank'] = self.request.GET.get('rank', '').strip()
-        context['ranks'] = Organism.objects.order_by('rank').values_list('rank', flat=True).distinct()
+        context['current_branch'] = self.request.GET.get('branch', '').strip()
+        context['ranks'] = Taxon.objects.order_by('rank').values_list('rank', flat=True).distinct()
+        context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
         return context
 
 
-class OrganismDetailView(DetailView):
-    model = Organism
+class TaxonDetailView(DetailView):
+    model = Taxon
     template_name = 'database/organism_detail.html'
-    context_object_name = 'organism'
+    context_object_name = 'taxon'
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        organism = self.object
-        qualitative = QualitativeFinding.objects.filter(organism=organism).select_related(
+        taxon = self.object
+        qualitative = QualitativeFinding.objects.filter(taxon=taxon).select_related(
             'comparison__study',
             'comparison__group_a',
             'comparison__group_b',
         )
-        quantitative = QuantitativeFinding.objects.filter(organism=organism).select_related('group__study')
+        quantitative = QuantitativeFinding.objects.filter(taxon=taxon).select_related('group__study')
+        lineage = (
+            TaxonClosure.objects.filter(descendant=taxon)
+            .select_related('ancestor')
+            .order_by('-depth')
+        )
         study_ids = {
             finding.comparison.study_id
             for finding in qualitative
@@ -314,6 +327,7 @@ class OrganismDetailView(DetailView):
         context['qualitative_count'] = qualitative.count()
         context['quantitative_count'] = quantitative.count()
         context['study_count'] = len(study_ids)
+        context['lineage'] = [path.ancestor for path in lineage]
         context['recent_qualitative_findings'] = qualitative.order_by('comparison__label', 'direction')[:10]
         context['recent_quantitative_findings'] = quantitative.order_by('group__name', 'value_type')[:10]
         return context
@@ -328,20 +342,20 @@ class QualitativeFindingListView(BrowserListView):
         'comparison__study__title',
         'comparison__group_a__name',
         'comparison__group_b__name',
-        'organism__scientific_name',
+        'taxon__scientific_name',
         'source',
     )
     ordering_map = {
-        'comparison': ('comparison__label', 'organism__scientific_name'),
-        '-comparison': ('-comparison__label', 'organism__scientific_name'),
-        'direction': ('direction', 'organism__scientific_name'),
-        '-direction': ('-direction', 'organism__scientific_name'),
-        'organism': ('organism__scientific_name',),
-        '-organism': ('-organism__scientific_name',),
+        'comparison': ('comparison__label', 'taxon__scientific_name'),
+        '-comparison': ('-comparison__label', 'taxon__scientific_name'),
+        'direction': ('direction', 'taxon__scientific_name'),
+        '-direction': ('-direction', 'taxon__scientific_name'),
+        'taxon': ('taxon__scientific_name',),
+        '-taxon': ('-taxon__scientific_name',),
         'created_at': ('created_at',),
         '-created_at': ('-created_at',),
     }
-    default_ordering = ('comparison__study__title', 'comparison__label', 'organism__scientific_name')
+    default_ordering = ('comparison__study__title', 'comparison__label', 'taxon__scientific_name')
 
     def get_queryset(self):
         return super().get_queryset().select_related(
@@ -349,7 +363,7 @@ class QualitativeFindingListView(BrowserListView):
             'comparison__study',
             'comparison__group_a',
             'comparison__group_b',
-            'organism',
+            'taxon',
             'import_batch',
         )
 
@@ -382,7 +396,7 @@ class QualitativeFindingDetailView(DetailView):
             'comparison__study',
             'comparison__group_a',
             'comparison__group_b',
-            'organism',
+            'taxon',
             'import_batch',
         )
 
@@ -394,23 +408,23 @@ class QuantitativeFindingListView(BrowserListView):
     search_fields = (
         'group__name',
         'group__study__title',
-        'organism__scientific_name',
+        'taxon__scientific_name',
         'source',
     )
     ordering_map = {
-        'group': ('group__name', 'organism__scientific_name'),
-        '-group': ('-group__name', 'organism__scientific_name'),
-        'organism': ('organism__scientific_name',),
-        '-organism': ('-organism__scientific_name',),
-        'value': ('value', 'organism__scientific_name'),
-        '-value': ('-value', 'organism__scientific_name'),
+        'group': ('group__name', 'taxon__scientific_name'),
+        '-group': ('-group__name', 'taxon__scientific_name'),
+        'taxon': ('taxon__scientific_name',),
+        '-taxon': ('-taxon__scientific_name',),
+        'value': ('value', 'taxon__scientific_name'),
+        '-value': ('-value', 'taxon__scientific_name'),
         'created_at': ('created_at',),
         '-created_at': ('-created_at',),
     }
-    default_ordering = ('group__study__title', 'group__name', 'organism__scientific_name')
+    default_ordering = ('group__study__title', 'group__name', 'taxon__scientific_name')
 
     def get_queryset(self):
-        return super().get_queryset().select_related('group', 'group__study', 'organism', 'import_batch')
+        return super().get_queryset().select_related('group', 'group__study', 'taxon', 'import_batch')
 
     def apply_filters(self, queryset):
         study_id = self.request.GET.get('study', '').strip()
@@ -436,4 +450,4 @@ class QuantitativeFindingDetailView(DetailView):
     context_object_name = 'finding'
 
     def get_queryset(self):
-        return QuantitativeFinding.objects.select_related('group', 'group__study', 'organism', 'import_batch')
+        return QuantitativeFinding.objects.select_related('group', 'group__study', 'taxon', 'import_batch')

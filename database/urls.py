@@ -12,8 +12,8 @@ urlpatterns = [
     path('groups/<int:pk>/', views.GroupDetailView.as_view(), name='group-detail'),
     path('comparisons/', views.ComparisonListView.as_view(), name='comparison-list'),
     path('comparisons/<int:pk>/', views.ComparisonDetailView.as_view(), name='comparison-detail'),
-    path('organisms/', views.OrganismListView.as_view(), name='organism-list'),
-    path('organisms/<int:pk>/', views.OrganismDetailView.as_view(), name='organism-detail'),
+    path('taxa/', views.TaxonListView.as_view(), name='taxon-list'),
+    path('taxa/<int:pk>/', views.TaxonDetailView.as_view(), name='taxon-detail'),
     path(
         'qualitative-findings/',
         views.QualitativeFindingListView.as_view(),

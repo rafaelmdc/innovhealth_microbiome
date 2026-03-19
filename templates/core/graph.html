@@ -8,7 +8,7 @@
   <div>
     <h1 class="mb-1">Disease Network</h1>
     <p class="text-secondary mb-0">
-      Explore qualitative findings as a three-column network: enriched organisms, diseases, and depleted organisms.
+      Explore qualitative findings as a three-column network: enriched taxa, diseases, and depleted taxa.
     </p>
   </div>
   <a class="btn btn-outline-secondary" href="{% url 'database:qualitativefinding-list' %}">Open qualitative browser</a>
@@ -39,8 +39,8 @@
       <input class="form-control" id="id_disease" type="text" name="disease" value="{{ current_disease }}" placeholder="Condition or target group">
     </div>
     <div class="col-md-4">
-      <label class="form-label" for="id_organism">Organism query</label>
-      <input class="form-control" id="id_organism" type="text" name="organism" value="{{ current_organism }}" placeholder="Scientific name or rank">
+      <label class="form-label" for="id_taxon">Taxon query</label>
+      <input class="form-control" id="id_taxon" type="text" name="taxon" value="{{ current_taxon }}" placeholder="Scientific name or rank">
     </div>
   </div>
   <div class="mt-3 d-flex gap-2">
@@ -62,7 +62,7 @@
     <div class="card shadow-sm metric-card">
       <div class="card-body">
         <p class="text-uppercase text-secondary small mb-2">Enriched Taxa</p>
-        <p class="display-6 mb-0">{{ graph_data.summary.enriched_organism_count }}</p>
+        <p class="display-6 mb-0">{{ graph_data.summary.enriched_taxon_count }}</p>
       </div>
     </div>
   </div>
@@ -70,7 +70,7 @@
     <div class="card shadow-sm metric-card">
       <div class="card-body">
         <p class="text-uppercase text-secondary small mb-2">Depleted Taxa</p>
-        <p class="display-6 mb-0">{{ graph_data.summary.depleted_organism_count }}</p>
+        <p class="display-6 mb-0">{{ graph_data.summary.depleted_taxon_count }}</p>
       </div>
     </div>
   </div>
@@ -91,7 +91,7 @@
         <div>
           <h2 class="h5 mb-1">Interactive Network</h2>
           <p class="text-secondary mb-0">
-            Click any disease or organism to isolate its local neighborhood. Click empty space to reset.
+            Click any disease or taxon to isolate its local neighborhood. Click empty space to reset.
           </p>
         </div>
         <button class="btn btn-outline-secondary btn-sm align-self-start align-self-lg-auto" type="button" id="graph-reset-focus">
@@ -99,9 +99,9 @@
         </button>
       </div>
       <div class="graph-stage">
-        <div class="graph-axis graph-axis-left">Enriched organisms</div>
+        <div class="graph-axis graph-axis-left">Enriched taxa</div>
         <div class="graph-axis graph-axis-center">Diseases</div>
-        <div class="graph-axis graph-axis-right">Depleted organisms</div>
+        <div class="graph-axis graph-axis-right">Depleted taxa</div>
         <div
           id="graph-canvas"
           style="height: {{ graph_data.summary.layout_height }}px; width: {{ graph_data.summary.layout_width }}px;"
@@ -114,15 +114,15 @@
     <div class="card-body">
       <h2 class="h5">Current graph payload</h2>
       <p class="text-secondary">
-        Diseases stay in the center. Enriched organisms connect from the left, depleted organisms from the right.
+        Diseases stay in the center. Enriched taxa connect from the left, depleted taxa from the right.
       </p>
       <div class="table-responsive">
         <table class="table table-sm mb-0">
           <thead>
             <tr>
-              <th>Enriched Organism</th>
+              <th>Enriched Taxon</th>
               <th>Disease</th>
-              <th>Depleted Organism</th>
+              <th>Depleted Taxon</th>
               <th>Findings</th>
               <th>Sources</th>
             </tr>

@@ -10,13 +10,13 @@ from database.models import (
     ImportBatch,
     MetadataValue,
     MetadataVariable,
-    Organism,
     QualitativeFinding,
     QuantitativeFinding,
     Study,
 )
 
-from .helpers import resolve_comparison, resolve_group, resolve_organism, resolve_study
+from .helpers import resolve_comparison, resolve_group, resolve_study, resolve_taxon_reference
+from .taxonomy import resolve_and_upsert_taxon, upsert_taxon_lineage
 
 
 @transaction.atomic
@@ -133,23 +133,23 @@ def run_workbook_comparison_import(valid_rows, batch):
     return applied_count
 
 
-def run_workbook_organism_import(valid_rows, batch):
-    """Upsert organisms from workbook preview rows."""
+def run_workbook_taxon_import(valid_rows, batch):
+    """Upsert taxa from workbook preview rows."""
     applied_count = 0
     for row in valid_rows:
-        organism = resolve_organism(row['scientific_name'], row['ncbi_taxonomy_id'])
-        if organism:
-            organism.ncbi_taxonomy_id = row['ncbi_taxonomy_id']
-            organism.scientific_name = row['scientific_name']
-            organism.rank = row['rank']
-            organism.notes = row['notes']
-            organism.save(update_fields=['ncbi_taxonomy_id', 'scientific_name', 'rank', 'notes', 'updated_at'])
+        if row.get('lineage'):
+            upsert_taxon_lineage(
+                row['lineage'],
+                aliases=row.get('aliases', ()),
+                leaf_notes=row.get('notes', ''),
+            )
         else:
-            Organism.objects.create(
-                ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
+            resolve_and_upsert_taxon(
                 scientific_name=row['scientific_name'],
+                ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
                 rank=row['rank'],
                 notes=row['notes'],
+                aliases=row.get('aliases', ()),
             )
         applied_count += 1
     return applied_count
@@ -204,15 +204,15 @@ def run_workbook_qualitative_finding_import(valid_rows, batch):
             row['group_b_name'],
             row['comparison_label'],
         )
-        organism = resolve_organism(
-            row['organism_scientific_name'],
-            row.get('organism_ncbi_taxonomy_id'),
+        taxon = resolve_taxon_reference(
+            row['taxon_scientific_name'],
+            row.get('taxon_ncbi_taxonomy_id'),
         )
-        if not comparison or not organism:
+        if not comparison or not taxon:
             continue
         QualitativeFinding.objects.update_or_create(
             comparison=comparison,
-            organism=organism,
+            taxon=taxon,
             direction=row['direction'],
             source=row['source'],
             defaults={
@@ -229,15 +229,15 @@ def run_workbook_quantitative_finding_import(valid_rows, batch):
     applied_count = 0
     for row in valid_rows:
         group = resolve_group(row.get('study_doi', ''), row.get('study_title', ''), row['group_name'])
-        organism = resolve_organism(
-            row['organism_scientific_name'],
-            row.get('organism_ncbi_taxonomy_id'),
+        taxon = resolve_taxon_reference(
+            row['taxon_scientific_name'],
+            row.get('taxon_ncbi_taxonomy_id'),
         )
-        if not group or not organism:
+        if not group or not taxon:
             continue
         QuantitativeFinding.objects.update_or_create(
             group=group,
-            organism=organism,
+            taxon=taxon,
             value_type=row['value_type'],
             source=row['source'],
             defaults={
@@ -303,7 +303,7 @@ WORKBOOK_IMPORT_RUNNERS = {
     'study': run_workbook_study_import,
     'group': run_workbook_group_import,
     'comparison': run_workbook_comparison_import,
-    'organism': run_workbook_organism_import,
+    'taxon': run_workbook_taxon_import,
     'metadata_variable': run_workbook_metadata_variable_import,
     'metadata_value': run_workbook_metadata_value_import,
     'qualitative_finding': run_workbook_qualitative_finding_import,

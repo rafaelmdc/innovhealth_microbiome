@@ -7,11 +7,11 @@ Required columns:
 - `group_a_name`
 - `group_b_name`
 - `comparison_label`
-- `organism_scientific_name`
+- `taxon_scientific_name`
 - `direction`
 - `source`
 
 Optional columns:
 
-- `organism_ncbi_taxonomy_id`
+- `taxon_ncbi_taxonomy_id`
 - `notes`

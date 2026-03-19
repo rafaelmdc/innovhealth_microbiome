@@ -8,10 +8,12 @@ from .models import (
     ImportBatch,
     MetadataValue,
     MetadataVariable,
-    Organism,
     QualitativeFinding,
     QuantitativeFinding,
     Study,
+    Taxon,
+    TaxonClosure,
+    TaxonName,
 )
 
 admin.site.site_header = 'Innov Health Microbiome Admin'
@@ -44,8 +46,8 @@ class MetadataValueInline(admin.TabularInline):
 class QuantitativeFindingInline(admin.TabularInline):
     model = QuantitativeFinding
     extra = 0
-    autocomplete_fields = ('organism', 'import_batch')
-    fields = ('organism', 'value_type', 'value', 'unit', 'source', 'import_batch')
+    autocomplete_fields = ('taxon', 'import_batch')
+    fields = ('taxon', 'value_type', 'value', 'unit', 'source', 'import_batch')
 
 
 class AlphaMetricInline(admin.TabularInline):
@@ -58,8 +60,8 @@ class AlphaMetricInline(admin.TabularInline):
 class QualitativeFindingInline(admin.TabularInline):
     model = QualitativeFinding
     extra = 0
-    autocomplete_fields = ('organism', 'import_batch')
-    fields = ('organism', 'direction', 'source', 'import_batch')
+    autocomplete_fields = ('taxon', 'import_batch')
+    fields = ('taxon', 'direction', 'source', 'import_batch')
 
 
 class BetaMetricInline(admin.TabularInline):
@@ -97,41 +99,57 @@ class ComparisonAdmin(admin.ModelAdmin):
     inlines = (QualitativeFindingInline, BetaMetricInline)
 
 
-@admin.register(Organism)
-class OrganismAdmin(admin.ModelAdmin):
-    list_display = ('scientific_name', 'ncbi_taxonomy_id', 'rank')
-    list_filter = ('rank',)
-    search_fields = ('scientific_name', 'ncbi_taxonomy_id', 'rank')
+class TaxonNameInline(admin.TabularInline):
+    model = TaxonName
+    extra = 0
+    fields = ('name', 'name_class', 'source', 'is_preferred')
+
+
+class TaxonClosureDescendantInline(admin.TabularInline):
+    model = TaxonClosure
+    fk_name = 'ancestor'
+    extra = 0
+    autocomplete_fields = ('descendant',)
+    fields = ('descendant', 'depth')
+
+
+@admin.register(Taxon)
+class TaxonAdmin(admin.ModelAdmin):
+    list_display = ('scientific_name', 'ncbi_taxonomy_id', 'rank', 'parent', 'is_active')
+    list_filter = ('rank', 'is_active')
+    search_fields = ('scientific_name', 'ncbi_taxonomy_id', 'rank', 'names__name')
+    autocomplete_fields = ('parent',)
+    inlines = (TaxonNameInline, TaxonClosureDescendantInline)
 
 
 @admin.register(QualitativeFinding)
 class QualitativeFindingAdmin(admin.ModelAdmin):
-    list_display = ('organism', 'comparison', 'direction', 'source', 'import_batch')
+    list_display = ('taxon', 'comparison', 'direction', 'source', 'import_batch')
     list_filter = ('direction', 'comparison__study', 'import_batch')
     search_fields = (
-        'organism__scientific_name',
+        'taxon__scientific_name',
         'comparison__label',
         'comparison__study__title',
         'source',
         'notes',
     )
-    list_select_related = ('organism', 'comparison__study', 'comparison__group_a', 'comparison__group_b', 'import_batch')
-    autocomplete_fields = ('comparison', 'organism', 'import_batch')
+    list_select_related = ('taxon', 'comparison__study', 'comparison__group_a', 'comparison__group_b', 'import_batch')
+    autocomplete_fields = ('comparison', 'taxon', 'import_batch')
 
 
 @admin.register(QuantitativeFinding)
 class QuantitativeFindingAdmin(admin.ModelAdmin):
-    list_display = ('organism', 'group', 'value_type', 'value', 'source', 'import_batch')
+    list_display = ('taxon', 'group', 'value_type', 'value', 'source', 'import_batch')
     list_filter = ('value_type', 'group__study', 'import_batch')
     search_fields = (
-        'organism__scientific_name',
+        'taxon__scientific_name',
         'group__name',
         'group__study__title',
         'source',
         'notes',
     )
-    list_select_related = ('organism', 'group__study', 'import_batch')
-    autocomplete_fields = ('group', 'organism', 'import_batch')
+    list_select_related = ('taxon', 'group__study', 'import_batch')
+    autocomplete_fields = ('group', 'taxon', 'import_batch')
 
 
 @admin.register(AlphaMetric)

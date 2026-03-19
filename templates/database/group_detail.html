@@ -46,7 +46,7 @@
           <table class="table table-sm mb-0">
             <thead>
               <tr>
-                <th>Organism</th>
+                <th>Taxon</th>
                 <th>Value Type</th>
                 <th>Value</th>
                 <th>Source</th>
@@ -55,7 +55,7 @@
             <tbody>
               {% for finding in group.quantitative_findings.all %}
                 <tr>
-                  <td>{{ finding.organism.scientific_name }}</td>
+                  <td>{{ finding.taxon.scientific_name }}</td>
                   <td><a href="{% url 'database:quantitativefinding-detail' finding.pk %}">{{ finding.get_value_type_display }}</a></td>
                   <td>{{ finding.value }}</td>
                   <td>{{ finding.source }}</td>

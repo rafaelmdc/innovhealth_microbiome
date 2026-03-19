@@ -13,7 +13,7 @@ from .workbook_sections import (
     build_comparison_section,
     build_diversity_sections,
     build_group_section,
-    build_organism_section,
+    build_taxon_section,
     build_paper_section,
     build_qualitative_section,
     build_quantitative_section,
@@ -90,7 +90,7 @@ def build_workbook_preview(*, file_name, content, batch_name):
         )
     )
     sections.append(
-        build_organism_section(
+        build_taxon_section(
             sheet=sheets.get('organisms', {'fieldnames': [], 'rows': []}),
             batch_name=batch_name,
             file_name=file_name,

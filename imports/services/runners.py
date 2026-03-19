@@ -7,22 +7,31 @@ from database.models import (
     Group,
     MetadataValue,
     MetadataVariable,
-    Organism,
     QualitativeFinding,
     QuantitativeFinding,
     Study,
 )
 
+from .taxonomy import resolve_and_upsert_taxon, upsert_taxon_lineage
 
-def run_organism_import(valid_rows, batch):
-    """Create organism records from validated CSV rows."""
+
+def run_taxon_import(valid_rows, batch):
+    """Create taxon records from validated CSV rows."""
     for row in valid_rows:
-        Organism.objects.create(
-            ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
-            scientific_name=row['scientific_name'],
-            rank=row['rank'],
-            notes=row['notes'],
-        )
+        if row.get('lineage'):
+            upsert_taxon_lineage(
+                row['lineage'],
+                aliases=row.get('aliases', ()),
+                leaf_notes=row.get('notes', ''),
+            )
+        else:
+            resolve_and_upsert_taxon(
+                scientific_name=row['scientific_name'],
+                ncbi_taxonomy_id=row['ncbi_taxonomy_id'],
+                rank=row['rank'],
+                notes=row['notes'],
+                aliases=row.get('aliases', ()),
+            )
     return len(valid_rows)
 
 
@@ -99,7 +108,7 @@ def run_qualitative_finding_import(valid_rows, batch):
     for row in valid_rows:
         QualitativeFinding.objects.create(
             comparison_id=row['comparison_id'],
-            organism_id=row['organism_id'],
+            taxon_id=row['taxon_id'],
             direction=row['direction'],
             source=row['source'],
             notes=row['notes'],
@@ -113,7 +122,7 @@ def run_quantitative_finding_import(valid_rows, batch):
     for row in valid_rows:
         QuantitativeFinding.objects.create(
             group_id=row['group_id'],
-            organism_id=row['organism_id'],
+            taxon_id=row['taxon_id'],
             value_type=row['value_type'],
             value=row['value'],
             unit=row['unit'],
@@ -153,7 +162,7 @@ def run_beta_metric_import(valid_rows, batch):
 
 
 IMPORT_RUNNERS = {
-    'organism': run_organism_import,
+    'taxon': run_taxon_import,
     'study': run_study_import,
     'group': run_group_import,
     'comparison': run_comparison_import,

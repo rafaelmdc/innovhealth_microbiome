@@ -1,25 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}{{ organism.scientific_name }}{% endblock %}
+{% block title %}{{ taxon.scientific_name }}{% endblock %}
 {% block body_class %}detail-page{% endblock %}
 
 {% block content %}
 <div class="page-intro detail-hero mb-4">
-  <a class="back-link mb-3" href="{% url 'database:organism-list' %}">Back to organisms</a>
-  <h1 class="mb-1">{{ organism.scientific_name }}</h1>
-  <p class="text-secondary mb-0">{{ organism.rank|title }}</p>
+  <a class="back-link mb-3" href="{% url 'database:taxon-list' %}">Back to taxa</a>
+  <h1 class="mb-1">{{ taxon.scientific_name }}</h1>
+  <p class="text-secondary mb-0">{{ taxon.rank|title }}</p>
 </div>
 
 <div class="row g-4">
   <div class="col-lg-4">
     <div class="card shadow-sm detail-card">
       <div class="card-body">
-        <h2 class="h5">Organism details</h2>
+        <h2 class="h5">Taxon details</h2>
         <dl class="row mb-0 detail-grid">
           <dt class="col-sm-5">NCBI ID</dt>
-          <dd class="col-sm-7">{{ organism.ncbi_taxonomy_id|default:"-" }}</dd>
+          <dd class="col-sm-7">{{ taxon.ncbi_taxonomy_id|default:"-" }}</dd>
           <dt class="col-sm-5">Rank</dt>
-          <dd class="col-sm-7">{{ organism.rank }}</dd>
+          <dd class="col-sm-7">{{ taxon.rank|default:"-" }}</dd>
+          <dt class="col-sm-5">Parent</dt>
+          <dd class="col-sm-7">{% if taxon.parent %}<a href="{% url 'database:taxon-detail' taxon.parent.pk %}">{{ taxon.parent.scientific_name }}</a>{% else %}-{% endif %}</dd>
           <dt class="col-sm-5">Studies</dt>
           <dd class="col-sm-7">{{ study_count }}</dd>
           <dt class="col-sm-5">Qualitative</dt>
@@ -29,11 +31,24 @@
         </dl>
       </div>
     </div>
-    {% if organism.notes %}
+    {% if taxon.notes %}
       <div class="card shadow-sm detail-card mt-4">
         <div class="card-body">
           <h2 class="h5">Notes</h2>
-          <p class="mb-0">{{ organism.notes }}</p>
+          <p class="mb-0">{{ taxon.notes }}</p>
+        </div>
+      </div>
+    {% endif %}
+    {% if lineage %}
+      <div class="card shadow-sm detail-card mt-4">
+        <div class="card-body">
+          <h2 class="h5">Lineage</h2>
+          <p class="mb-0">
+            {% for lineage_taxon in lineage %}
+              {% if not forloop.first %} &rarr; {% endif %}
+              <a href="{% url 'database:taxon-detail' lineage_taxon.pk %}">{{ lineage_taxon.scientific_name }}</a>
+            {% endfor %}
+          </p>
         </div>
       </div>
     {% endif %}
@@ -60,7 +75,7 @@
                 </tr>
               {% empty %}
                 <tr>
-                  <td colspan="3" class="text-center text-secondary py-3">No qualitative findings recorded for this organism.</td>
+                  <td colspan="3" class="text-center text-secondary py-3">No qualitative findings recorded for this taxon.</td>
                 </tr>
               {% endfor %}
             </tbody>
@@ -92,7 +107,7 @@
                 </tr>
               {% empty %}
                 <tr>
-                  <td colspan="4" class="text-center text-secondary py-3">No quantitative findings recorded for this organism.</td>
+                  <td colspan="4" class="text-center text-secondary py-3">No quantitative findings recorded for this taxon.</td>
                 </tr>
               {% endfor %}
             </tbody>

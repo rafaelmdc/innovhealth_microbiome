@@ -73,15 +73,17 @@ Rules:
 - unique `(study, group_a, group_b, label)`
 - both groups must belong to the selected study
 
-### Organism
+### Taxon
 
-Taxon record.
+Canonical taxon record.
 
 Fields:
 
 - `scientific_name`
 - `rank`
 - `ncbi_taxonomy_id`
+- `parent`
+- `is_active`
 - `notes`
 - `created_at`
 - `updated_at`
@@ -89,15 +91,45 @@ Fields:
 Rules:
 
 - `ncbi_taxonomy_id` is unique when present
+- taxonomy uses a self-referential parent link
+
+### TaxonClosure
+
+Ancestor/descendant traversal table.
+
+Fields:
+
+- `ancestor`
+- `descendant`
+- `depth`
+
+Rules:
+
+- unique `(ancestor, descendant)`
+- self rows are stored with `depth = 0`
+
+### TaxonName
+
+Alias and synonym table linked to `Taxon`.
+
+Fields:
+
+- `taxon`
+- `name`
+- `name_class`
+- `source`
+- `is_preferred`
+- `created_at`
+- `updated_at`
 
 ### QualitativeFinding
 
-Directional finding for one organism in one comparison.
+Directional finding for one taxon in one comparison.
 
 Fields:
 
 - `comparison`
-- `organism`
+- `taxon`
 - `direction`
 - `source`
 - `import_batch`
@@ -107,16 +139,16 @@ Fields:
 
 Rules:
 
-- unique `(comparison, organism, direction, source)`
+- unique `(comparison, taxon, direction, source)`
 
 ### QuantitativeFinding
 
-Numeric value for one organism in one group.
+Numeric value for one taxon in one group.
 
 Fields:
 
 - `group`
-- `organism`
+- `taxon`
 - `value_type`
 - `value`
 - `unit`
@@ -128,7 +160,7 @@ Fields:
 
 Rules:
 
-- unique `(group, organism, value_type, source)`
+- unique `(group, taxon, value_type, source)`
 
 ### MetadataVariable
 

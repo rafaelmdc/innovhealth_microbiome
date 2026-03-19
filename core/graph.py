@@ -49,17 +49,17 @@ def _build_disease_positions(disease_nodes, organism_positions, *, x_position, f
 
 def build_disease_graph(findings):
     disease_nodes = {}
-    organism_nodes = {}
+    taxon_nodes = {}
     edge_map = {}
-    unique_organism_ids = set()
+    unique_taxon_ids = set()
 
     for finding in findings:
         comparison = finding.comparison
-        organism = finding.organism
+        taxon = finding.taxon
         disease_label = _disease_label(comparison)
         disease_node_id = f'disease-{disease_label.lower()}'
         direction_column = 'enriched' if finding.direction in {'enriched', 'increased'} else 'depleted'
-        organism_node_id = f'{direction_column}-organism-{organism.pk}'
+        taxon_node_id = f'{direction_column}-taxon-{taxon.pk}'
 
         disease_node = disease_nodes.setdefault(
             disease_node_id,
@@ -74,33 +74,33 @@ def build_disease_graph(findings):
             },
         )
         disease_node['study_ids'].add(comparison.study_id)
-        disease_node['neighbors'].add(organism_node_id)
+        disease_node['neighbors'].add(taxon_node_id)
         disease_node['comparison_labels'].add(comparison.label)
         disease_node['group_names'].add(comparison.group_a.name)
 
-        organism_node = organism_nodes.setdefault(
-            organism_node_id,
+        taxon_node = taxon_nodes.setdefault(
+            taxon_node_id,
             {
-                'id': organism_node_id,
-                'label': organism.scientific_name,
-                'node_type': 'organism',
+                'id': taxon_node_id,
+                'label': taxon.scientific_name,
+                'node_type': 'taxon',
                 'column': direction_column,
                 'direction': direction_column,
-                'rank': organism.rank,
-                'taxonomy_id': organism.ncbi_taxonomy_id,
+                'rank': taxon.rank,
+                'taxonomy_id': taxon.ncbi_taxonomy_id,
                 'study_ids': set(),
                 'neighbors': set(),
             },
         )
-        organism_node['study_ids'].add(comparison.study_id)
-        organism_node['neighbors'].add(disease_node_id)
-        unique_organism_ids.add(organism.pk)
+        taxon_node['study_ids'].add(comparison.study_id)
+        taxon_node['neighbors'].add(disease_node_id)
+        unique_taxon_ids.add(taxon.pk)
 
-        edge_key = (organism_node_id, disease_node_id)
+        edge_key = (taxon_node_id, disease_node_id)
         edge = edge_map.setdefault(
             edge_key,
             {
-                'source': organism_node_id,
+                'source': taxon_node_id,
                 'target': disease_node_id,
                 'column': direction_column,
                 'finding_count': 0,
@@ -115,11 +115,11 @@ def build_disease_graph(findings):
         edge['comparison_labels'].add(comparison.label)
 
     enriched_positions = _build_positions(
-        {node_id: node for node_id, node in organism_nodes.items() if node['column'] == 'enriched'},
+        {node_id: node for node_id, node in taxon_nodes.items() if node['column'] == 'enriched'},
         x_position=180,
     )
     depleted_positions = _build_positions(
-        {node_id: node for node_id, node in organism_nodes.items() if node['column'] == 'depleted'},
+        {node_id: node for node_id, node in taxon_nodes.items() if node['column'] == 'depleted'},
         x_position=1060,
     )
     disease_positions = _build_disease_positions(
@@ -148,7 +148,7 @@ def build_disease_graph(findings):
             }
         )
 
-    for attrs in organism_nodes.values():
+    for attrs in taxon_nodes.values():
         nodes.append(
             {
                 'data': {
@@ -168,7 +168,7 @@ def build_disease_graph(findings):
 
     edges = []
     for edge in edge_map.values():
-        source_node = organism_nodes[edge['source']]
+        source_node = taxon_nodes[edge['source']]
         target_node = disease_nodes[edge['target']]
         edges.append(
             {
@@ -191,8 +191,8 @@ def build_disease_graph(findings):
     nodes.sort(key=lambda item: (item['data']['node_type'], item['data'].get('column', ''), item['data']['label']))
     edges.sort(key=lambda item: (item['data']['target_label'], item['data']['column'], item['data']['source_label']))
 
-    enriched_count = sum(1 for node in organism_nodes.values() if node['column'] == 'enriched')
-    depleted_count = sum(1 for node in organism_nodes.values() if node['column'] == 'depleted')
+    enriched_count = sum(1 for node in taxon_nodes.values() if node['column'] == 'enriched')
+    depleted_count = sum(1 for node in taxon_nodes.values() if node['column'] == 'depleted')
     max_column_count = max(
         enriched_count,
         depleted_count,
@@ -209,9 +209,9 @@ def build_disease_graph(findings):
             'edge_count': len(edges),
             'finding_count': sum(edge['data']['finding_count'] for edge in edges),
             'disease_count': len(disease_nodes),
-            'organism_count': len(unique_organism_ids),
-            'enriched_organism_count': enriched_count,
-            'depleted_organism_count': depleted_count,
+            'taxon_count': len(unique_taxon_ids),
+            'enriched_taxon_count': enriched_count,
+            'depleted_taxon_count': depleted_count,
             'layout_width': 1240,
             'layout_height': layout_height,
         },

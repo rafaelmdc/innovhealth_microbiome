@@ -19,6 +19,7 @@ from .helpers import (
     parse_optional_int,
     split_source_and_notes,
 )
+from .taxonomy import build_taxon_preview_payload
 from .workbook_common import build_section_preview, missing_columns_error
 
 
@@ -370,8 +371,8 @@ def build_comparison_section(*, sheet, batch_name, file_name, state):
     )
 
 
-def build_organism_section(*, sheet, batch_name, file_name, state):
-    """Build the organism preview section and seed workbook organism references."""
+def build_taxon_section(*, sheet, batch_name, file_name, state):
+    """Build the taxon preview section and seed workbook taxon references."""
     required_columns = ('organism_id', 'organism_as_written')
     valid_rows = []
     errors = []
@@ -388,7 +389,8 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
             row_number = row['row_number']
             data = cleaned_row(row['data'])
             organism_id = data.get('organism_id', '')
-            scientific_name = data.get('organism_as_written', '')
+            raw_name = data.get('organism_as_written', '')
+            scientific_name = data.get('suggested_clean_name', '') or raw_name
 
             if not any(
                 [
@@ -410,7 +412,7 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
                 continue
             organism_ids_seen.add(organism_id)
 
-            if not scientific_name:
+            if not raw_name:
                 errors.append({'row_number': row_number, 'message': 'organism_as_written is required.'})
                 continue
 
@@ -424,26 +426,33 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
                 errors.append({'row_number': row_number, 'message': resolved_error})
                 continue
             if is_resolved is not True:
-                state['unresolved_organism_ids'].add(organism_id)
+                state['unresolved_taxon_ids'].add(organism_id)
                 state['skipped_rows'].append(
                     {
                         'section': 'organisms',
                         'row_number': row_number,
-                        'message': f'Skipped because organism {organism_id} is not resolved.',
+                        'message': f'Skipped because taxon {organism_id} is not resolved.',
                     }
                 )
                 continue
 
-            state['organism_refs'][organism_id] = {
-                'scientific_name': scientific_name,
-                'ncbi_taxonomy_id': ncbi_taxonomy_id,
-            }
-
             notes = combine_note_parts(
                 data.get('notes', ''),
-                labeled_note('Suggested clean name', data.get('suggested_clean_name', '')),
+                labeled_note('Imported as written', raw_name),
                 labeled_note('Resolved', data.get('resolved', '')),
             )
+            resolution = build_taxon_preview_payload(
+                scientific_name=scientific_name,
+                ncbi_taxonomy_id=ncbi_taxonomy_id,
+                rank=data.get('rank_if_known', ''),
+                notes=notes,
+                aliases=[raw_name] if raw_name.lower() != scientific_name.lower() else [],
+            )
+
+            state['taxon_refs'][organism_id] = {
+                'scientific_name': resolution['scientific_name'],
+                'ncbi_taxonomy_id': resolution['ncbi_taxonomy_id'],
+            }
 
             duplicate_name_key = scientific_name.lower()
             if ncbi_taxonomy_id is not None:
@@ -459,16 +468,22 @@ def build_organism_section(*, sheet, batch_name, file_name, state):
             valid_rows.append(
                 {
                     'row_number': row_number,
-                    'ncbi_taxonomy_id': ncbi_taxonomy_id,
-                    'scientific_name': scientific_name,
-                    'rank': data.get('rank_if_known', ''),
-                    'notes': notes,
+                    'ncbi_taxonomy_id': resolution['ncbi_taxonomy_id'],
+                    'scientific_name': resolution['scientific_name'],
+                    'rank': resolution['rank'],
+                    'notes': resolution['notes'],
+                    'aliases': resolution['aliases'],
+                    'lineage': resolution['lineage'],
+                    'lineage_summary': resolution['lineage_summary'],
+                    'resolution_status': resolution['resolution_status'],
+                    'review_required': resolution['review_required'],
+                    'resolver_source': resolution['resolver_source'],
                 }
             )
 
     return build_section_preview(
         batch_name=batch_name,
-        import_type='organism',
+        import_type='taxon',
         file_name=file_name,
         required_columns=required_columns,
         valid_rows=valid_rows,
@@ -509,12 +524,12 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                 )
                 continue
 
-            if organism_id in state['unresolved_organism_ids']:
+            if organism_id in state['unresolved_taxon_ids']:
                 state['skipped_rows'].append(
                     {
                         'section': 'qualitative_findings',
                         'row_number': row_number,
-                        'message': f'Skipped because organism {organism_id} is not resolved.',
+                        'message': f'Skipped because taxon {organism_id} is not resolved.',
                     }
                 )
                 continue
@@ -524,9 +539,9 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                 errors.append({'row_number': row_number, 'message': 'comparison_id does not resolve to a valid comparison.'})
                 continue
 
-            organism_ref = state['organism_refs'].get(organism_id)
-            if not organism_ref:
-                errors.append({'row_number': row_number, 'message': 'organism_id does not resolve to a valid organism.'})
+            taxon_ref = state['taxon_refs'].get(organism_id)
+            if not taxon_ref:
+                errors.append({'row_number': row_number, 'message': 'organism_id does not resolve to a valid taxon.'})
                 continue
 
             direction = data.get('direction', '')
@@ -556,7 +571,7 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                 comparison_ref['group_a_name'],
                 comparison_ref['group_b_name'],
                 comparison_ref['comparison_label'],
-                organism_ref['scientific_name'],
+                taxon_ref['scientific_name'],
                 WORKBOOK_DIRECTION_MAP[direction],
                 source,
             )
@@ -572,8 +587,8 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                     'group_a_name': comparison_ref['group_a_name'],
                     'group_b_name': comparison_ref['group_b_name'],
                     'comparison_label': comparison_ref['comparison_label'],
-                    'organism_scientific_name': organism_ref['scientific_name'],
-                    'organism_ncbi_taxonomy_id': organism_ref['ncbi_taxonomy_id'],
+                    'taxon_scientific_name': taxon_ref['scientific_name'],
+                    'taxon_ncbi_taxonomy_id': taxon_ref['ncbi_taxonomy_id'],
                     'direction': WORKBOOK_DIRECTION_MAP[direction],
                     'source': source,
                     'notes': notes,
@@ -623,12 +638,12 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                 )
                 continue
 
-            if organism_id in state['unresolved_organism_ids']:
+            if organism_id in state['unresolved_taxon_ids']:
                 state['skipped_rows'].append(
                     {
                         'section': 'quantitative_findings',
                         'row_number': row_number,
-                        'message': f'Skipped because organism {organism_id} is not resolved.',
+                        'message': f'Skipped because taxon {organism_id} is not resolved.',
                     }
                 )
                 continue
@@ -638,9 +653,9 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                 errors.append({'row_number': row_number, 'message': 'group_id does not resolve to a valid group.'})
                 continue
 
-            organism_ref = state['organism_refs'].get(organism_id)
-            if not organism_ref:
-                errors.append({'row_number': row_number, 'message': 'organism_id does not resolve to a valid organism.'})
+            taxon_ref = state['taxon_refs'].get(organism_id)
+            if not taxon_ref:
+                errors.append({'row_number': row_number, 'message': 'organism_id does not resolve to a valid taxon.'})
                 continue
 
             value_type = data.get('value_type', '')
@@ -661,7 +676,7 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                 group_ref['study_doi'],
                 group_ref['study_title'],
                 group_ref['group_name'],
-                organism_ref['scientific_name'],
+                taxon_ref['scientific_name'],
                 value_type,
                 source,
             )
@@ -675,8 +690,8 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                     'study_doi': group_ref['study_doi'],
                     'study_title': group_ref['study_title'],
                     'group_name': group_ref['group_name'],
-                    'organism_scientific_name': organism_ref['scientific_name'],
-                    'organism_ncbi_taxonomy_id': organism_ref['ncbi_taxonomy_id'],
+                    'taxon_scientific_name': taxon_ref['scientific_name'],
+                    'taxon_ncbi_taxonomy_id': taxon_ref['ncbi_taxonomy_id'],
                     'value_type': value_type,
                     'value': value,
                     'unit': data.get('unit', ''),

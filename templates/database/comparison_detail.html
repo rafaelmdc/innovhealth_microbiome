@@ -42,7 +42,7 @@
           <table class="table table-sm mb-0">
             <thead>
               <tr>
-                <th>Organism</th>
+                <th>Taxon</th>
                 <th>Direction</th>
                 <th>Source</th>
               </tr>
@@ -50,7 +50,7 @@
             <tbody>
               {% for finding in comparison.qualitative_findings.all %}
                 <tr>
-                  <td>{{ finding.organism.scientific_name }}</td>
+                  <td>{{ finding.taxon.scientific_name }}</td>
                   <td><a href="{% url 'database:qualitativefinding-detail' finding.pk %}">{{ finding.get_direction_display }}</a></td>
                   <td>{{ finding.source }}</td>
                 </tr>

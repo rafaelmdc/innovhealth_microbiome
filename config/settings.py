@@ -109,6 +109,12 @@ else:
     }
 
 
+DEFAULT_TAXONOMY_DB_PATH = BASE_DIR.parent / 'taxonbridge' / 'data' / 'ncbi_taxonomy.sqlite'
+DEFAULT_TAXONOMY_CACHE_DB_PATH = BASE_DIR / '.taxonomy_cache.sqlite'
+TAXONOMY_DB_PATH = os.getenv('TAXONOMY_DB_PATH', str(DEFAULT_TAXONOMY_DB_PATH))
+TAXONOMY_CACHE_DB_PATH = os.getenv('TAXONOMY_CACHE_DB_PATH', str(DEFAULT_TAXONOMY_CACHE_DB_PATH))
+
+
 # Password validation
 # https://docs.djangoproject.com/en/6.0/ref/settings/#auth-password-validators
 

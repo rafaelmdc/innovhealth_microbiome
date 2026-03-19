@@ -55,6 +55,68 @@
       gap: 12px;
       align-items: center;
     }
+    .resolver-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 8px 0 14px;
+    }
+    .resolver-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid #d9d9d9;
+      background: #fff;
+    }
+    .resolver-chip-auto {
+      background: #edf7f2;
+      border-color: #98d4b2;
+      color: #14532d;
+    }
+    .resolver-chip-review {
+      background: #fff4db;
+      border-color: #f4c96b;
+      color: #8a4b08;
+    }
+    .resolver-chip-fallback {
+      background: #eef2ff;
+      border-color: #b9c3ff;
+      color: #3730a3;
+    }
+    .resolver-row-auto td {
+      background: #f7fcf9;
+    }
+    .resolver-row-review td {
+      background: #fffaf0;
+    }
+    .resolver-row-fallback td {
+      background: #f7f8ff;
+    }
+    .resolver-detail {
+      display: block;
+      margin-top: 4px;
+      color: #666;
+      font-size: 11px;
+      text-transform: capitalize;
+    }
+    .resolver-bool {
+      font-weight: 600;
+    }
+    .resolver-bool-yes {
+      color: #8a4b08;
+    }
+    .resolver-bool-no {
+      color: #14532d;
+    }
+    .lineage-cell {
+      min-width: 280px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
   </style>
 
   <h1>{{ import_label }} Import Preview</h1>
@@ -126,6 +188,13 @@
         {{ section.duplicates|length }} duplicates,
         {{ section.errors|length }} errors.
       </p>
+      {% if section.import_type == 'taxon' and section.valid_rows %}
+        <div class="resolver-legend">
+          <span class="resolver-chip resolver-chip-auto">Auto-resolved</span>
+          <span class="resolver-chip resolver-chip-review">Review required</span>
+          <span class="resolver-chip resolver-chip-fallback">Fallback local</span>
+        </div>
+      {% endif %}
       {% if section.valid_rows %}
         <table class="import-table">
           <thead>
@@ -137,9 +206,20 @@
           </thead>
           <tbody>
             {% for row in section.valid_rows %}
-              <tr>
+              <tr class="resolver-row-{% if row|resolver_bucket %}{{ row|resolver_bucket }}{% endif %}">
                 {% for key, label in section.preview_columns %}
-                  <td>{{ row|get_item:key|default:"" }}</td>
+                  <td{% if key == 'lineage_summary' %} class="lineage-cell"{% endif %}>
+                    {% if key == 'resolution_status' and row|resolver_bucket %}
+                      <span class="resolver-chip resolver-chip-{{ row|resolver_bucket }}">{{ row|resolver_label }}</span>
+                      <span class="resolver-detail">{{ row|resolver_detail }}</span>
+                    {% elif key == 'review_required' and row|resolver_bucket %}
+                      <span class="resolver-bool {% if row|get_item:key %}resolver-bool-yes{% else %}resolver-bool-no{% endif %}">
+                        {% if row|get_item:key %}Yes{% else %}No{% endif %}
+                      </span>
+                    {% else %}
+                      {{ row|get_item:key|default:"" }}
+                    {% endif %}
+                  </td>
                 {% endfor %}
               </tr>
             {% endfor %}
@@ -168,6 +248,13 @@
 
     {% if preview.valid_rows %}
       <h2>Rows To Import</h2>
+      {% if preview.import_type == 'taxon' %}
+        <div class="resolver-legend">
+          <span class="resolver-chip resolver-chip-auto">Auto-resolved</span>
+          <span class="resolver-chip resolver-chip-review">Review required</span>
+          <span class="resolver-chip resolver-chip-fallback">Fallback local</span>
+        </div>
+      {% endif %}
       <table class="import-table">
         <thead>
           <tr>
@@ -178,9 +265,20 @@
         </thead>
         <tbody>
           {% for row in preview.valid_rows %}
-            <tr>
+            <tr class="resolver-row-{% if row|resolver_bucket %}{{ row|resolver_bucket }}{% endif %}">
               {% for key, label in preview_columns %}
-                <td>{{ row|get_item:key|default:"" }}</td>
+                <td{% if key == 'lineage_summary' %} class="lineage-cell"{% endif %}>
+                  {% if key == 'resolution_status' and row|resolver_bucket %}
+                    <span class="resolver-chip resolver-chip-{{ row|resolver_bucket }}">{{ row|resolver_label }}</span>
+                    <span class="resolver-detail">{{ row|resolver_detail }}</span>
+                  {% elif key == 'review_required' and row|resolver_bucket %}
+                    <span class="resolver-bool {% if row|get_item:key %}resolver-bool-yes{% else %}resolver-bool-no{% endif %}">
+                      {% if row|get_item:key %}Yes{% else %}No{% endif %}
+                    </span>
+                  {% else %}
+                    {{ row|get_item:key|default:"" }}
+                  {% endif %}
+                </td>
               {% endfor %}
             </tr>
           {% endfor %}

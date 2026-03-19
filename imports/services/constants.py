@@ -4,7 +4,7 @@ from database.models import MetadataVariable, QualitativeFinding, QuantitativeFi
 
 
 SUPPORTED_IMPORT_TYPES = (
-    'organism',
+    'taxon',
     'study',
     'group',
     'comparison',

@@ -13,11 +13,14 @@ IMPORT_TYPE_LABELS = {
     CsvImportUploadForm.SOURCE_FORMAT_WORKBOOK: 'Excel Workbook',
 }
 PREVIEW_COLUMNS = {
-    'organism': [
+    'taxon': [
         ('row_number', 'Row'),
         ('ncbi_taxonomy_id', 'NCBI Taxonomy ID'),
         ('scientific_name', 'Scientific Name'),
         ('rank', 'Rank'),
+        ('resolution_status', 'Resolution Status'),
+        ('review_required', 'Review Required'),
+        ('lineage_summary', 'Lineage'),
     ],
     'study': [
         ('row_number', 'Row'),
@@ -70,7 +73,7 @@ PREVIEW_COLUMNS = {
         ('group_a_name', 'Group A'),
         ('group_b_name', 'Group B'),
         ('comparison_label', 'Comparison'),
-        ('organism_scientific_name', 'Organism'),
+        ('taxon_scientific_name', 'Taxon'),
         ('direction', 'Direction'),
         ('source', 'Source'),
     ],
@@ -79,7 +82,7 @@ PREVIEW_COLUMNS = {
         ('study_doi', 'Study DOI'),
         ('study_title', 'Study Title'),
         ('group_name', 'Group'),
-        ('organism_scientific_name', 'Organism'),
+        ('taxon_scientific_name', 'Taxon'),
         ('value_type', 'Value Type'),
         ('value', 'Value'),
         ('unit', 'Unit'),

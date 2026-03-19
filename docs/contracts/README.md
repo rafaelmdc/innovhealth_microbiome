@@ -4,7 +4,7 @@ This directory defines the expected CSV shapes for the admin-only import workflo
 
 Supported contracts:
 
-- `organism_csv.md`
+- `taxon_csv.md`
 - `study_csv.md`
 - `group_csv.md`
 - `comparison_csv.md`

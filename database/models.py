@@ -98,10 +98,18 @@ class Comparison(TimestampedModel):
             raise ValidationError('group_b must belong to the selected study.')
 
 
-class Organism(TimestampedModel):
+class Taxon(TimestampedModel):
     scientific_name = models.CharField(max_length=255, db_index=True)
-    rank = models.CharField(max_length=64)
-    ncbi_taxonomy_id = models.PositiveIntegerField(blank=True, null=True)
+    rank = models.CharField(max_length=64, blank=True, db_index=True)
+    ncbi_taxonomy_id = models.PositiveBigIntegerField(blank=True, null=True)
+    parent = models.ForeignKey(
+        'self',
+        on_delete=models.PROTECT,
+        related_name='children',
+        blank=True,
+        null=True,
+    )
+    is_active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 
     class Meta:
@@ -110,12 +118,82 @@ class Organism(TimestampedModel):
             models.UniqueConstraint(
                 fields=['ncbi_taxonomy_id'],
                 condition=Q(ncbi_taxonomy_id__isnull=False),
-                name='organism_unique_ncbi_taxonomy_id_when_present',
+                name='taxon_unique_ncbi_taxonomy_id_when_present',
             ),
+        ]
+        indexes = [
+            models.Index(fields=['rank', 'scientific_name'], name='taxon_rank_name_idx'),
         ]
 
     def __str__(self):
         return self.scientific_name
+
+
+class TaxonClosure(models.Model):
+    ancestor = models.ForeignKey(
+        Taxon,
+        on_delete=models.CASCADE,
+        related_name='closure_descendants',
+    )
+    descendant = models.ForeignKey(
+        Taxon,
+        on_delete=models.CASCADE,
+        related_name='closure_ancestors',
+    )
+    depth = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ['ancestor__scientific_name', 'depth', 'descendant__scientific_name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['ancestor', 'descendant'],
+                name='taxon_closure_unique_ancestor_descendant',
+            ),
+            models.CheckConstraint(
+                condition=Q(depth__gte=0),
+                name='taxon_closure_depth_gte_zero',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['ancestor', 'depth', 'descendant'], name='taxon_closure_anc_idx'),
+            models.Index(fields=['descendant', 'depth', 'ancestor'], name='taxon_closure_desc_idx'),
+        ]
+
+    def __str__(self):
+        return f'{self.ancestor} -> {self.descendant} ({self.depth})'
+
+
+class TaxonName(TimestampedModel):
+    class NameClass(models.TextChoices):
+        SCIENTIFIC = 'scientific', 'Scientific'
+        SYNONYM = 'synonym', 'Synonym'
+        ALIAS = 'alias', 'Alias'
+        IMPORTED_AS_WRITTEN = 'imported_as_written', 'Imported As Written'
+
+    taxon = models.ForeignKey(
+        Taxon,
+        on_delete=models.CASCADE,
+        related_name='names',
+    )
+    name = models.CharField(max_length=255, db_index=True)
+    name_class = models.CharField(max_length=50, choices=NameClass.choices)
+    source = models.CharField(max_length=255, blank=True)
+    is_preferred = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ['name', 'taxon__scientific_name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['taxon', 'name', 'name_class'],
+                name='taxon_name_unique_taxon_name_class',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['name_class', 'name'], name='taxon_name_class_name_idx'),
+        ]
+
+    def __str__(self):
+        return self.name
 
 
 class ImportBatch(models.Model):
@@ -158,8 +236,8 @@ class QualitativeFinding(TimestampedModel):
         on_delete=models.CASCADE,
         related_name='qualitative_findings',
     )
-    organism = models.ForeignKey(
-        Organism,
+    taxon = models.ForeignKey(
+        Taxon,
         on_delete=models.CASCADE,
         related_name='qualitative_findings',
     )
@@ -175,16 +253,16 @@ class QualitativeFinding(TimestampedModel):
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['comparison__study__title', 'comparison__label', 'organism__scientific_name']
+        ordering = ['comparison__study__title', 'comparison__label', 'taxon__scientific_name']
         constraints = [
             models.UniqueConstraint(
-                fields=['comparison', 'organism', 'direction', 'source'],
-                name='qualitative_finding_unique_comparison_organism_direction_source',
+                fields=['comparison', 'taxon', 'direction', 'source'],
+                name='qualitative_finding_unique_comparison_taxon_direction_source',
             ),
         ]
 
     def __str__(self):
-        return f'{self.comparison} | {self.organism} ({self.direction})'
+        return f'{self.comparison} | {self.taxon} ({self.direction})'
 
 
 class QuantitativeFinding(TimestampedModel):
@@ -196,8 +274,8 @@ class QuantitativeFinding(TimestampedModel):
         on_delete=models.CASCADE,
         related_name='quantitative_findings',
     )
-    organism = models.ForeignKey(
-        Organism,
+    taxon = models.ForeignKey(
+        Taxon,
         on_delete=models.CASCADE,
         related_name='quantitative_findings',
     )
@@ -215,16 +293,16 @@ class QuantitativeFinding(TimestampedModel):
     notes = models.TextField(blank=True)
 
     class Meta:
-        ordering = ['group__study__title', 'group__name', 'organism__scientific_name']
+        ordering = ['group__study__title', 'group__name', 'taxon__scientific_name']
         constraints = [
             models.UniqueConstraint(
-                fields=['group', 'organism', 'value_type', 'source'],
-                name='quantitative_finding_unique_group_organism_type_source',
+                fields=['group', 'taxon', 'value_type', 'source'],
+                name='quantitative_finding_unique_group_taxon_type_source',
             ),
         ]
 
     def __str__(self):
-        return f'{self.group} | {self.organism} ({self.value_type})'
+        return f'{self.group} | {self.taxon} ({self.value_type})'
 
 
 class AlphaMetric(TimestampedModel):

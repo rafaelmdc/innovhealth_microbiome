@@ -7,10 +7,10 @@ from database.models import (
     Group,
     MetadataValue,
     MetadataVariable,
-    Organism,
     QualitativeFinding,
     QuantitativeFinding,
     Study,
+    Taxon,
 )
 
 from .helpers import (
@@ -21,10 +21,11 @@ from .helpers import (
     parse_optional_int,
     resolve_comparison,
     resolve_group,
-    resolve_organism,
     resolve_study,
+    resolve_taxon_reference,
     row_requires_study_reference,
 )
+from .taxonomy import build_taxon_preview_payload
 from .types import ImportPreview
 
 
@@ -61,8 +62,8 @@ def build_preview_response(*, batch_name, import_type, file_name, required_colum
     )
 
 
-def build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_type):
-    """Validate and preview organism CSV rows."""
+def build_taxon_preview(*, file_name, fieldnames, rows, batch_name, import_type):
+    """Validate and preview taxon CSV rows."""
     required_columns = ('scientific_name', 'rank')
     missing_columns = [column for column in required_columns if column not in fieldnames]
     if missing_columns:
@@ -75,9 +76,9 @@ def build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_ty
         )
 
     existing_taxonomy_ids = set(
-        Organism.objects.exclude(ncbi_taxonomy_id__isnull=True).values_list('ncbi_taxonomy_id', flat=True)
+        Taxon.objects.exclude(ncbi_taxonomy_id__isnull=True).values_list('ncbi_taxonomy_id', flat=True)
     )
-    existing_names = {name.lower() for name in Organism.objects.values_list('scientific_name', flat=True)}
+    existing_names = {name.lower() for name in Taxon.objects.values_list('scientific_name', flat=True)}
     seen_taxonomy_ids = set()
     seen_names = set()
     valid_rows = []
@@ -101,22 +102,34 @@ def build_organism_preview(*, file_name, fieldnames, rows, batch_name, import_ty
                 duplicates.append({'row_number': row_number, 'message': 'Duplicate ncbi_taxonomy_id in uploaded file.'})
                 continue
             if taxonomy_id in existing_taxonomy_ids:
-                duplicates.append({'row_number': row_number, 'message': 'Organism with this ncbi_taxonomy_id already exists.'})
+                duplicates.append({'row_number': row_number, 'message': 'Taxon with this ncbi_taxonomy_id already exists.'})
                 continue
         elif duplicate_name_key in seen_names or duplicate_name_key in existing_names:
-            duplicates.append({'row_number': row_number, 'message': 'Organism with this scientific_name already exists.'})
+            duplicates.append({'row_number': row_number, 'message': 'Taxon with this scientific_name already exists.'})
             continue
 
         if taxonomy_id is not None:
             seen_taxonomy_ids.add(taxonomy_id)
         seen_names.add(duplicate_name_key)
+        resolution = build_taxon_preview_payload(
+            scientific_name=row['scientific_name'],
+            ncbi_taxonomy_id=taxonomy_id,
+            rank=row['rank'],
+            notes=row.get('notes', ''),
+        )
         valid_rows.append(
             {
                 'row_number': row_number,
-                'ncbi_taxonomy_id': taxonomy_id,
-                'scientific_name': row['scientific_name'],
-                'rank': row['rank'],
-                'notes': row.get('notes', ''),
+                'ncbi_taxonomy_id': resolution['ncbi_taxonomy_id'],
+                'scientific_name': resolution['scientific_name'],
+                'rank': resolution['rank'],
+                'notes': resolution['notes'],
+                'aliases': resolution['aliases'],
+                'lineage': resolution['lineage'],
+                'lineage_summary': resolution['lineage_summary'],
+                'resolution_status': resolution['resolution_status'],
+                'review_required': resolution['review_required'],
+                'resolver_source': resolution['resolver_source'],
             }
         )
 
@@ -521,14 +534,14 @@ def build_metadata_value_preview(*, file_name, fieldnames, rows, batch_name, imp
 
 
 def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name, import_type):
-    """Validate and preview qualitative finding CSV rows against comparisons and organisms."""
+    """Validate and preview qualitative finding CSV rows against comparisons and taxa."""
     required_columns = (
         'study_doi',
         'study_title',
         'group_a_name',
         'group_b_name',
         'comparison_label',
-        'organism_scientific_name',
+        'taxon_scientific_name',
         'direction',
         'source',
     )
@@ -543,7 +556,7 @@ def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name
         )
 
     existing_keys = set(
-        QualitativeFinding.objects.values_list('comparison_id', 'organism_id', 'direction', 'source')
+        QualitativeFinding.objects.values_list('comparison_id', 'taxon_id', 'direction', 'source')
     )
     seen_keys = set()
     valid_rows = []
@@ -557,8 +570,8 @@ def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name
         if not row['group_a_name'] or not row['group_b_name'] or not row['comparison_label']:
             errors.append({'row_number': row_number, 'message': 'Comparison reference fields are required.'})
             continue
-        if not row['organism_scientific_name'] or not row['direction'] or not row['source']:
-            errors.append({'row_number': row_number, 'message': 'organism_scientific_name, direction, and source are required.'})
+        if not row['taxon_scientific_name'] or not row['direction'] or not row['source']:
+            errors.append({'row_number': row_number, 'message': 'taxon_scientific_name, direction, and source are required.'})
             continue
 
         comparison = resolve_comparison(
@@ -573,27 +586,27 @@ def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name
             continue
 
         taxonomy_id, taxonomy_error = parse_optional_int(
-            row.get('organism_ncbi_taxonomy_id', ''),
-            'organism_ncbi_taxonomy_id',
+            row.get('taxon_ncbi_taxonomy_id', ''),
+            'taxon_ncbi_taxonomy_id',
         )
         if taxonomy_error:
             errors.append({'row_number': row_number, 'message': taxonomy_error})
             continue
-        organism = resolve_organism(row['organism_scientific_name'], taxonomy_id)
-        if not organism:
-            errors.append({'row_number': row_number, 'message': 'Organism reference does not resolve to an existing Organism.'})
+        taxon = resolve_taxon_reference(row['taxon_scientific_name'], taxonomy_id)
+        if not taxon:
+            errors.append({'row_number': row_number, 'message': 'Taxon reference does not resolve to an existing Taxon.'})
             continue
 
         if row['direction'] not in QualitativeFinding.Direction.values:
             errors.append({'row_number': row_number, 'message': 'direction must be one of: enriched, depleted, increased, decreased.'})
             continue
 
-        duplicate_key = (comparison.pk, organism.pk, row['direction'], row['source'])
+        duplicate_key = (comparison.pk, taxon.pk, row['direction'], row['source'])
         if duplicate_key in seen_keys:
             duplicates.append({'row_number': row_number, 'message': 'Duplicate qualitative finding row in uploaded file.'})
             continue
         if duplicate_key in existing_keys:
-            duplicates.append({'row_number': row_number, 'message': 'QualitativeFinding already exists for this comparison, organism, direction, and source.'})
+            duplicates.append({'row_number': row_number, 'message': 'QualitativeFinding already exists for this comparison, taxon, direction, and source.'})
             continue
         seen_keys.add(duplicate_key)
 
@@ -601,13 +614,13 @@ def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name
             {
                 'row_number': row_number,
                 'comparison_id': comparison.pk,
-                'organism_id': organism.pk,
+                'taxon_id': taxon.pk,
                 'study_doi': row['study_doi'],
                 'study_title': row['study_title'],
                 'group_a_name': row['group_a_name'],
                 'group_b_name': row['group_b_name'],
                 'comparison_label': row['comparison_label'],
-                'organism_scientific_name': organism.scientific_name,
+                'taxon_scientific_name': taxon.scientific_name,
                 'direction': row['direction'],
                 'source': row['source'],
                 'notes': row.get('notes', ''),
@@ -626,12 +639,12 @@ def build_qualitative_finding_preview(*, file_name, fieldnames, rows, batch_name
 
 
 def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_name, import_type):
-    """Validate and preview quantitative finding CSV rows against groups and organisms."""
+    """Validate and preview quantitative finding CSV rows against groups and taxa."""
     required_columns = (
         'study_doi',
         'study_title',
         'group_name',
-        'organism_scientific_name',
+        'taxon_scientific_name',
         'value_type',
         'value',
         'source',
@@ -647,7 +660,7 @@ def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
         )
 
     existing_keys = set(
-        QuantitativeFinding.objects.values_list('group_id', 'organism_id', 'value_type', 'source')
+        QuantitativeFinding.objects.values_list('group_id', 'taxon_id', 'value_type', 'source')
     )
     seen_keys = set()
     valid_rows = []
@@ -658,8 +671,8 @@ def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
         row = cleaned_row(raw_row)
         if not row_requires_study_reference(row, errors, row_number):
             continue
-        if not row['group_name'] or not row['organism_scientific_name'] or not row['value_type'] or not row['source']:
-            errors.append({'row_number': row_number, 'message': 'group_name, organism_scientific_name, value_type, and source are required.'})
+        if not row['group_name'] or not row['taxon_scientific_name'] or not row['value_type'] or not row['source']:
+            errors.append({'row_number': row_number, 'message': 'group_name, taxon_scientific_name, value_type, and source are required.'})
             continue
 
         group = resolve_group(row['study_doi'], row['study_title'], row['group_name'])
@@ -668,15 +681,15 @@ def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
             continue
 
         taxonomy_id, taxonomy_error = parse_optional_int(
-            row.get('organism_ncbi_taxonomy_id', ''),
-            'organism_ncbi_taxonomy_id',
+            row.get('taxon_ncbi_taxonomy_id', ''),
+            'taxon_ncbi_taxonomy_id',
         )
         if taxonomy_error:
             errors.append({'row_number': row_number, 'message': taxonomy_error})
             continue
-        organism = resolve_organism(row['organism_scientific_name'], taxonomy_id)
-        if not organism:
-            errors.append({'row_number': row_number, 'message': 'Organism reference does not resolve to an existing Organism.'})
+        taxon = resolve_taxon_reference(row['taxon_scientific_name'], taxonomy_id)
+        if not taxon:
+            errors.append({'row_number': row_number, 'message': 'Taxon reference does not resolve to an existing Taxon.'})
             continue
 
         if row['value_type'] not in QuantitativeFinding.ValueType.values:
@@ -688,12 +701,12 @@ def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
             errors.append({'row_number': row_number, 'message': value_error})
             continue
 
-        duplicate_key = (group.pk, organism.pk, row['value_type'], row['source'])
+        duplicate_key = (group.pk, taxon.pk, row['value_type'], row['source'])
         if duplicate_key in seen_keys:
             duplicates.append({'row_number': row_number, 'message': 'Duplicate quantitative finding row in uploaded file.'})
             continue
         if duplicate_key in existing_keys:
-            duplicates.append({'row_number': row_number, 'message': 'QuantitativeFinding already exists for this group, organism, value_type, and source.'})
+            duplicates.append({'row_number': row_number, 'message': 'QuantitativeFinding already exists for this group, taxon, value_type, and source.'})
             continue
         seen_keys.add(duplicate_key)
 
@@ -701,11 +714,11 @@ def build_quantitative_finding_preview(*, file_name, fieldnames, rows, batch_nam
             {
                 'row_number': row_number,
                 'group_id': group.pk,
-                'organism_id': organism.pk,
+                'taxon_id': taxon.pk,
                 'study_doi': row['study_doi'],
                 'study_title': row['study_title'],
                 'group_name': row['group_name'],
-                'organism_scientific_name': organism.scientific_name,
+                'taxon_scientific_name': taxon.scientific_name,
                 'value_type': row['value_type'],
                 'value': value,
                 'unit': row.get('unit', ''),
@@ -885,7 +898,7 @@ def build_beta_metric_preview(*, file_name, fieldnames, rows, batch_name, import
 
 
 PREVIEW_BUILDERS = {
-    'organism': build_organism_preview,
+    'taxon': build_taxon_preview,
     'study': build_study_preview,
     'group': build_group_preview,
     'comparison': build_comparison_preview,

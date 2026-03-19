@@ -1,4 +1,4 @@
-# Organism CSV
+# Taxon CSV
 
 Required columns:
 

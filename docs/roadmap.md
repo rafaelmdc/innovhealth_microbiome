@@ -17,7 +17,9 @@ The application now centers on:
 - `Study`
 - `Group`
 - `Comparison`
-- `Organism`
+- `Taxon`
+- `TaxonClosure`
+- `TaxonName`
 - `QualitativeFinding`
 - `QuantitativeFinding`
 
@@ -44,7 +46,7 @@ The browser should support:
 - studies
 - groups
 - comparisons
-- organisms
+- taxa
 - qualitative findings
 - quantitative findings
 
@@ -52,7 +54,7 @@ The browser should support:
 
 Supported CSV imports:
 
-- organism
+- taxon
 - study
 - group
 - comparison

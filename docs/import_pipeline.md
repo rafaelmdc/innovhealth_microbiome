@@ -4,7 +4,7 @@ The current import pipeline is a create-only import workflow with preview and va
 
 ## Supported import types
 
-- `organism`
+- `taxon`
 - `study`
 - `group`
 - `comparison`
@@ -44,7 +44,8 @@ The importer implementation now lives in the `imports.services` package.
 - studies resolve by `study_doi` first, then `study_title`
 - groups resolve by study reference plus `group_name`
 - comparisons resolve by study reference plus `group_a_name`, `group_b_name`, and `comparison_label`
-- organisms resolve by `organism_ncbi_taxonomy_id` when present, otherwise `organism_scientific_name`
+- taxa resolve by `taxon_ncbi_taxonomy_id` when present, otherwise `taxon_scientific_name`
+- workbook organism identifiers still map to canonical `Taxon` rows after resolution
 
 ## Validation rules
 

@@ -3,7 +3,7 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Comparison, Group, MetadataValue, MetadataVariable, Organism, QualitativeFinding, QuantitativeFinding, Study
+from .models import Comparison, Group, MetadataValue, MetadataVariable, Taxon, QualitativeFinding, QuantitativeFinding, Study
 
 
 class StudyModelTests(TestCase):
@@ -125,20 +125,20 @@ class BrowserViewTests(TestCase):
             group_b=Group.objects.create(study=self.study_a, name='Reference'),
             label='Case vs reference',
         )
-        self.organism = Organism.objects.create(
+        self.taxon = Taxon.objects.create(
             ncbi_taxonomy_id=111,
             scientific_name='Faecalibacterium prausnitzii',
             rank='species',
         )
         self.qualitative_finding = QualitativeFinding.objects.create(
             comparison=self.comparison,
-            organism=self.organism,
+            taxon=self.taxon,
             direction=QualitativeFinding.Direction.ENRICHED,
             source='Table 2',
         )
         self.quantitative_finding = QuantitativeFinding.objects.create(
             group=self.group_a,
-            organism=self.organism,
+            taxon=self.taxon,
             value_type=QuantitativeFinding.ValueType.RELATIVE_ABUNDANCE,
             value=0.62,
             source='Table 3',
@@ -166,25 +166,25 @@ class BrowserViewTests(TestCase):
         self.assertContains(response, 'Case')
         self.assertNotContains(response, 'Control')
 
-    def test_organism_list_filters_by_rank(self):
-        genus_organism = Organism.objects.create(
+    def test_taxon_list_filters_by_rank(self):
+        genus_taxon = Taxon.objects.create(
             scientific_name='Bacteroides',
             rank='genus',
         )
 
         response = self.client.get(
-            reverse('database:organism-list'),
+            reverse('database:taxon-list'),
             {'rank': 'species'},
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Faecalibacterium prausnitzii')
-        self.assertNotContains(response, f'/browser/organisms/{genus_organism.pk}/')
+        self.assertNotContains(response, f'/browser/taxa/{genus_taxon.pk}/')
 
     def test_qualitative_finding_list_filters_by_direction(self):
         QualitativeFinding.objects.create(
             comparison=self.comparison,
-            organism=Organism.objects.create(scientific_name='Roseburia intestinalis', rank='species'),
+            taxon=Taxon.objects.create(scientific_name='Roseburia intestinalis', rank='species'),
             direction=QualitativeFinding.Direction.DEPLETED,
             source='Supplementary Table S4',
         )
@@ -212,7 +212,7 @@ class BrowserViewTests(TestCase):
             reverse('database:study-detail', args=[self.study_a.pk]),
             reverse('database:group-detail', args=[self.group_a.pk]),
             reverse('database:comparison-detail', args=[self.comparison.pk]),
-            reverse('database:organism-detail', args=[self.organism.pk]),
+            reverse('database:taxon-detail', args=[self.taxon.pk]),
             reverse('database:qualitativefinding-detail', args=[self.qualitative_finding.pk]),
             reverse('database:quantitativefinding-detail', args=[self.quantitative_finding.pk]),
         ]

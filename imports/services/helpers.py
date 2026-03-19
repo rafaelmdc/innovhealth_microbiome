@@ -4,7 +4,9 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from database.models import Comparison, Group, Organism, Study
+from database.models import Comparison, Group, Study
+
+from .taxonomy import resolve_taxon
 
 from .constants import BOOLEAN_FALSE_VALUES, BOOLEAN_TRUE_VALUES, WORKBOOK_SHEET_ALIASES, WORKBOOK_SHEET_ORDER
 
@@ -92,15 +94,9 @@ def resolve_comparison(study_doi, study_title, group_a_name, group_b_name, label
     )
 
 
-def resolve_organism(scientific_name, ncbi_taxonomy_id):
-    """Resolve an organism by taxonomy id first, then by case-insensitive scientific name."""
-    if ncbi_taxonomy_id is not None:
-        organism = Organism.objects.filter(ncbi_taxonomy_id=ncbi_taxonomy_id).first()
-        if organism:
-            return organism
-    if scientific_name:
-        return Organism.objects.filter(scientific_name__iexact=scientific_name).first()
-    return None
+def resolve_taxon_reference(scientific_name, ncbi_taxonomy_id):
+    """Resolve a taxon by taxonomy ID first, then by known names."""
+    return resolve_taxon(scientific_name, ncbi_taxonomy_id)
 
 
 def row_requires_study_reference(row, errors, row_number):

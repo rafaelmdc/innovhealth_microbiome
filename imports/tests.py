@@ -1,6 +1,8 @@
 from io import BytesIO
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.urls import reverse
 from openpyxl import Workbook
 
 from database.models import (
@@ -11,7 +13,7 @@ from database.models import (
     ImportBatch,
     MetadataValue,
     MetadataVariable,
-    Organism,
+    Taxon,
     QualitativeFinding,
     QuantitativeFinding,
     Study,
@@ -31,9 +33,9 @@ class ImportServiceTests(TestCase):
             group_b=self.group_b,
             label='Case vs control',
         )
-        self.organism = Organism.objects.create(
+        self.taxon = Taxon.objects.create(
             ncbi_taxonomy_id=100,
-            scientific_name='Organism A',
+            scientific_name='Taxon A',
             rank='species',
         )
         self.metadata_variable = MetadataVariable.objects.create(
@@ -108,15 +110,15 @@ class ImportServiceTests(TestCase):
         preview = build_preview(
             file_name='qualitative_findings.csv',
             content=(
-                'study_doi,study_title,group_a_name,group_b_name,comparison_label,organism_scientific_name,direction,source\n'
-                '10.1000/example,,Case,Control,Case vs control,Organism A,enriched,Table 2\n'
+                'study_doi,study_title,group_a_name,group_b_name,comparison_label,taxon_scientific_name,direction,source\n'
+                '10.1000/example,,Case,Control,Case vs control,Taxon A,enriched,Table 2\n'
             ),
             import_type='qualitative_finding',
             batch_name='Qualitative batch',
         ).to_dict()
 
         batch = run_import(preview)
-        finding = QualitativeFinding.objects.get(comparison=self.comparison, organism=self.organism)
+        finding = QualitativeFinding.objects.get(comparison=self.comparison, taxon=self.taxon)
 
         self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
         self.assertEqual(finding.import_batch, batch)
@@ -126,8 +128,8 @@ class ImportServiceTests(TestCase):
         preview = build_preview(
             file_name='quantitative_findings.csv',
             content=(
-                'study_doi,study_title,group_name,organism_scientific_name,value_type,value,source\n'
-                '10.1000/example,,Case,Organism A,relative_abundance,not-a-number,Table 3\n'
+                'study_doi,study_title,group_name,taxon_scientific_name,value_type,value,source\n'
+                '10.1000/example,,Case,Taxon A,relative_abundance,not-a-number,Table 3\n'
             ),
             import_type='quantitative_finding',
             batch_name='Quantitative batch',
@@ -140,15 +142,15 @@ class ImportServiceTests(TestCase):
         preview = build_preview(
             file_name='quantitative_findings.csv',
             content=(
-                'study_doi,study_title,group_name,organism_scientific_name,value_type,value,source\n'
-                '10.1000/example,,Case,Organism A,relative_abundance,0.42,Table 3\n'
+                'study_doi,study_title,group_name,taxon_scientific_name,value_type,value,source\n'
+                '10.1000/example,,Case,Taxon A,relative_abundance,0.42,Table 3\n'
             ),
             import_type='quantitative_finding',
             batch_name='Quantitative batch',
         ).to_dict()
 
         batch = run_import(preview)
-        finding = QuantitativeFinding.objects.get(group=self.group_a, organism=self.organism)
+        finding = QuantitativeFinding.objects.get(group=self.group_a, taxon=self.taxon)
 
         self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
         self.assertEqual(finding.import_batch, batch)
@@ -156,27 +158,109 @@ class ImportServiceTests(TestCase):
 
     def test_organism_import_creates_import_batch_and_records(self):
         preview = build_preview(
-            file_name='organisms.csv',
+            file_name='taxa.csv',
             content=(
                 'ncbi_taxonomy_id,scientific_name,rank,notes\n'
                 '101,Faecalibacterium prausnitzii,species,Important commensal\n'
             ),
-            import_type='organism',
-            batch_name='Organism batch',
-        ).to_dict()
+            import_type='taxon',
+            batch_name='Taxon batch',
+        )
+        preview_row = preview.valid_rows[0]
 
-        batch = run_import(preview)
+        batch = run_import(preview.to_dict())
 
         self.assertEqual(ImportBatch.objects.count(), 1)
         self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
         self.assertEqual(batch.success_count, 1)
         self.assertEqual(batch.error_count, 0)
         self.assertTrue(
-            Organism.objects.filter(
-                ncbi_taxonomy_id=101,
-                scientific_name='Faecalibacterium prausnitzii',
+            Taxon.objects.filter(
+                ncbi_taxonomy_id=preview_row['ncbi_taxonomy_id'],
+                scientific_name=preview_row['scientific_name'],
             ).exists()
         )
+
+    def test_taxon_preview_includes_resolution_metadata_and_lineage(self):
+        preview = build_preview(
+            file_name='taxa.csv',
+            content=(
+                'scientific_name,rank,notes\n'
+                'Faecalibacterium prausnitzii,species,Important commensal\n'
+            ),
+            import_type='taxon',
+            batch_name='Taxon preview batch',
+        )
+
+        self.assertEqual(preview.errors, [])
+        self.assertEqual(len(preview.valid_rows), 1)
+        row = preview.valid_rows[0]
+        self.assertEqual(row['scientific_name'], 'Faecalibacterium prausnitzii')
+        self.assertFalse(row['review_required'])
+        self.assertTrue(row['lineage'])
+        self.assertIn('Faecalibacterium prausnitzii', row['lineage_summary'])
+
+    def test_taxon_preview_page_shows_resolver_states(self):
+        user_model = get_user_model()
+        staff_user = user_model.objects.create_user(
+            username='importstaff',
+            password='testpass123',
+            is_staff=True,
+        )
+        self.client.login(username='importstaff', password='testpass123')
+        session = self.client.session
+        session['imports_preview'] = {
+            'batch_name': 'Taxon UI batch',
+            'import_type': 'taxon',
+            'required_columns': ['scientific_name', 'rank'],
+            'file_name': 'taxa.csv',
+            'total_rows': 3,
+            'valid_rows': [
+                {
+                    'row_number': 2,
+                    'scientific_name': 'Auto Taxon',
+                    'rank': 'species',
+                    'ncbi_taxonomy_id': 1,
+                    'resolution_status': 'resolved_exact_scientific',
+                    'review_required': False,
+                    'resolver_source': 'taxonbridge_name',
+                    'lineage_summary': 'root > Auto Taxon',
+                },
+                {
+                    'row_number': 3,
+                    'scientific_name': 'Review Taxon',
+                    'rank': 'species',
+                    'ncbi_taxonomy_id': '',
+                    'resolution_status': 'manual_review_required',
+                    'review_required': True,
+                    'resolver_source': 'taxonbridge_name',
+                    'lineage_summary': 'Review Taxon',
+                },
+                {
+                    'row_number': 4,
+                    'scientific_name': 'Fallback Taxon',
+                    'rank': 'genus',
+                    'ncbi_taxonomy_id': '',
+                    'resolution_status': 'taxonbridge_unavailable',
+                    'review_required': False,
+                    'resolver_source': 'local_fallback',
+                    'lineage_summary': 'Fallback Taxon',
+                },
+            ],
+            'errors': [],
+            'duplicates': [],
+        }
+        session.save()
+
+        response = self.client.get(reverse('imports:preview'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Auto-resolved')
+        self.assertContains(response, 'Review required')
+        self.assertContains(response, 'Fallback local')
+        self.assertContains(response, 'resolver-chip-auto')
+        self.assertContains(response, 'resolver-chip-review')
+        self.assertContains(response, 'resolver-chip-fallback')
 
     def test_alpha_metric_import_sets_import_batch(self):
         preview = build_preview(
@@ -265,7 +349,7 @@ class ImportServiceTests(TestCase):
         organism_sheet.append(
             ['organism_id', 'organism_as_written', 'suggested_clean_name', 'rank_if_known', 'notes', 'ncbi_id', 'resolved']
         )
-        organism_sheet.append(['o1', 'Blautia sp.', 'Blautia', 'genus', 'Organism note', 1234, 'true'])
+        organism_sheet.append(['o1', 'Blautia sp.', 'Blautia', 'genus', 'Taxon note', 1234, 'true'])
 
         metadata_sheet = workbook.create_sheet('extra_metadata')
         metadata_sheet.append(['paper_id', 'group_id', 'field_name', 'value_as_written', 'unit', 'where_found', 'notes'])
@@ -300,9 +384,9 @@ class ImportServiceTests(TestCase):
             group_b=controls,
             label='Cases vs Controls (case_vs_control)',
         )
-        organism = Organism.objects.get(scientific_name='Blautia sp.')
-        qualitative = QualitativeFinding.objects.get(comparison=comparison, organism=organism)
-        quantitative = QuantitativeFinding.objects.get(group=cases, organism=organism)
+        taxon = Taxon.objects.get(scientific_name='Blautia')
+        qualitative = QualitativeFinding.objects.get(comparison=comparison, taxon=taxon)
+        quantitative = QuantitativeFinding.objects.get(group=cases, taxon=taxon)
         alpha = AlphaMetric.objects.get(group=cases, metric='shannon')
         beta = BetaMetric.objects.get(comparison=comparison, metric='bray_curtis')
         bmi_variable = MetadataVariable.objects.get(name='bmi')
@@ -342,15 +426,15 @@ class ImportServiceTests(TestCase):
             label='Cases vs Controls (case_vs_control)',
             notes='Old comparison note',
         )
-        organism = Organism.objects.create(
+        taxon = Taxon.objects.create(
             ncbi_taxonomy_id=2222,
             scientific_name='Resolved Taxon',
             rank='old_rank',
-            notes='Old organism note',
+            notes='Old taxon note',
         )
         QuantitativeFinding.objects.create(
             group=cases,
-            organism=organism,
+            taxon=taxon,
             value_type=QuantitativeFinding.ValueType.RELATIVE_ABUNDANCE,
             value=0.1,
             unit='%',
@@ -388,7 +472,7 @@ class ImportServiceTests(TestCase):
         organism_sheet = workbook.create_sheet('organisms')
         organism_sheet.append(['organism_id', 'organism_as_written', 'suggested_clean_name', 'rank_if_known', 'notes', 'ncbi_id', 'resolved'])
         organism_sheet.append(['1', '', '', '', '', '', ''])
-        organism_sheet.append(['o1', 'Resolved Taxon', 'Resolved Taxon', 'species', 'Updated organism note', 2222, 'true'])
+        organism_sheet.append(['o1', 'Resolved Taxon', 'Resolved Taxon', 'species', 'Updated taxon note', 2222, 'true'])
         organism_sheet.append(['o2', 'Unresolved Taxon', '', '', 'No match', '', 'false'])
 
         output = BytesIO()
@@ -405,28 +489,28 @@ class ImportServiceTests(TestCase):
         self.assertEqual(preview.errors, [])
         self.assertEqual(preview.duplicates, [])
         self.assertTrue(any('paper.status is "to review"' in row['message'] for row in preview.skipped_rows))
-        self.assertTrue(any('organism o2 is not resolved' in row['message'] for row in preview.skipped_rows))
+        self.assertTrue(any('taxon o2 is not resolved' in row['message'] for row in preview.skipped_rows))
 
         batch = run_import(preview.to_dict())
 
         study.refresh_from_db()
         cases.refresh_from_db()
         comparison.refresh_from_db()
-        organism.refresh_from_db()
-        quantitative = QuantitativeFinding.objects.get(group=cases, organism=organism, source='Table 3')
-        qualitative = QualitativeFinding.objects.get(comparison=comparison, organism=organism, source='Table 2')
+        taxon.refresh_from_db()
+        quantitative = QuantitativeFinding.objects.get(group=cases, taxon=taxon, source='Table 3')
+        qualitative = QualitativeFinding.objects.get(comparison=comparison, taxon=taxon, source='Table 2')
 
         self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
         self.assertEqual(study.country, 'Portugal')
         self.assertIn('Updated study note', study.notes)
         self.assertEqual(cases.notes, 'Updated case note\nWhere found: Methods')
         self.assertIn('Updated comparison note', comparison.notes)
-        self.assertEqual(organism.rank, 'species')
-        self.assertIn('Updated organism note', organism.notes)
+        self.assertEqual(taxon.rank, 'species')
+        self.assertIn('Updated taxon note', taxon.notes)
         self.assertEqual(quantitative.value, 0.42)
         self.assertEqual(quantitative.import_batch, batch)
         self.assertEqual(qualitative.import_batch, batch)
-        self.assertFalse(Organism.objects.filter(scientific_name='Unresolved Taxon').exists())
+        self.assertFalse(Taxon.objects.filter(scientific_name='Unresolved Taxon').exists())
 
     def test_excel_workbook_missing_age_and_women_percent_are_imported_as_na(self):
         workbook = Workbook()
@@ -512,8 +596,8 @@ class ImportServiceTests(TestCase):
             group_b=controls,
             label='Cases vs Controls (case_vs_control)',
         )
-        organism = Organism.objects.get(scientific_name='Bacteroidaceae')
-        finding = QualitativeFinding.objects.get(comparison=comparison, organism=organism)
+        taxon = Taxon.objects.get(scientific_name='Bacteroidaceae')
+        finding = QualitativeFinding.objects.get(comparison=comparison, taxon=taxon)
 
         self.assertEqual(batch.status, ImportBatch.Status.COMPLETED)
         self.assertEqual(len(finding.source), 255)
