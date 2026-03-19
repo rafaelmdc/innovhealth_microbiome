@@ -160,6 +160,7 @@ def build_taxon_preview_payload(*, scientific_name, ncbi_taxonomy_id=None, rank=
 
     lineage = []
     resolution_status = 'preview_fallback_local'
+    resolution_message = 'Preview fallback local'
     review_required = True
     resolver_source = 'local_fallback'
 
@@ -167,22 +168,26 @@ def build_taxon_preview_payload(*, scientific_name, ncbi_taxonomy_id=None, rank=
         if ncbi_taxonomy_id is not None and _provided_name_matches_taxid(scientific_name, ncbi_taxonomy_id, rank=rank):
             lineage = get_lineage_for_taxid(ncbi_taxonomy_id)
             resolution_status = 'resolved_from_taxid'
+            resolution_message = 'Resolved from provided taxid'
             review_required = False
             resolver_source = 'taxonbridge_taxid'
 
         if not lineage and scientific_name:
             result = resolve_taxon_name(scientific_name, level=rank or None, allow_fuzzy=True)
             resolution_status = result.status.value
+            resolution_message = result.status.value.replace('_', ' ')
             review_required = result.review_required
             resolver_source = 'taxonbridge_name'
             if not result.review_required and result.matched_taxid is not None:
                 lineage = result.lineage or get_lineage_for_taxid(result.matched_taxid)
-    except TaxonbridgeUnavailable:
+    except TaxonbridgeUnavailable as exc:
         resolution_status = 'taxonbridge_unavailable'
+        resolution_message = str(exc)
         resolver_source = 'local_fallback'
         review_required = True
-    except Exception:
+    except Exception as exc:
         resolution_status = 'taxonbridge_error'
+        resolution_message = str(exc) or exc.__class__.__name__
         resolver_source = 'local_fallback'
         review_required = True
 
@@ -216,6 +221,7 @@ def build_taxon_preview_payload(*, scientific_name, ncbi_taxonomy_id=None, rank=
         'lineage': payload,
         'lineage_summary': lineage_summary,
         'resolution_status': resolution_status,
+        'resolution_message': resolution_message,
         'review_required': review_required,
         'resolver_source': resolver_source,
     }

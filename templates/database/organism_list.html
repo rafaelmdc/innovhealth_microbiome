@@ -53,6 +53,48 @@
   </div>
 </form>
 
+{% if selected_branch_taxon %}
+  <div class="card shadow-sm detail-card mb-4">
+    <div class="card-body">
+      <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap mb-3">
+        <div>
+          <p class="text-secondary text-uppercase small mb-1">Subtree View</p>
+          <h2 class="h5 mb-1">{{ selected_branch_taxon.scientific_name }}</h2>
+          <p class="text-secondary mb-0">
+            {{ selected_branch_taxon.rank|default:"Unranked"|title }} branch,
+            {{ selected_branch_descendant_count }} descendant{{ selected_branch_descendant_count|pluralize }}
+          </p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <a class="btn btn-outline-secondary btn-sm" href="{% url 'database:taxon-list' %}">All taxa</a>
+          <a class="btn btn-outline-primary btn-sm" href="{% url 'database:taxon-detail' selected_branch_taxon.pk %}">Branch detail</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{% url 'database:qualitativefinding-list' %}?branch={{ selected_branch_taxon.pk }}">Branch qualitative findings</a>
+          <a class="btn btn-outline-secondary btn-sm" href="{% url 'database:quantitativefinding-list' %}?branch={{ selected_branch_taxon.pk }}">Branch quantitative findings</a>
+        </div>
+      </div>
+      {% if selected_branch_lineage %}
+        <p class="mb-3">
+          {% for lineage_taxon in selected_branch_lineage %}
+            {% if not forloop.first %} &rarr; {% endif %}
+            {% if lineage_taxon.pk == selected_branch_taxon.pk %}
+              <strong>{{ lineage_taxon.scientific_name }}</strong>
+            {% else %}
+              <a href="{% url 'database:taxon-list' %}?branch={{ lineage_taxon.pk }}">{{ lineage_taxon.scientific_name }}</a>
+            {% endif %}
+          {% endfor %}
+        </p>
+      {% endif %}
+      {% if selected_branch_children %}
+        <div class="d-flex flex-wrap gap-2">
+          {% for child in selected_branch_children %}
+            <a class="btn btn-outline-primary btn-sm" href="{% url 'database:taxon-list' %}?branch={{ child.pk }}">{{ child.scientific_name }}</a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
+
 <div class="card shadow-sm data-shell">
   <div class="table-responsive">
     <table class="table table-hover mb-0">
@@ -61,6 +103,7 @@
           <th><a href="{% querystring order_by='scientific_name' page='' %}">Scientific name</a></th>
           <th><a href="{% querystring order_by='ncbi_taxonomy_id' page='' %}">NCBI taxonomy ID</a></th>
           <th><a href="{% querystring order_by='rank' page='' %}">Rank</a></th>
+          <th>Parent</th>
         </tr>
       </thead>
       <tbody>
@@ -69,10 +112,17 @@
             <td><a href="{% url 'database:taxon-detail' taxon.pk %}">{{ taxon.scientific_name }}</a></td>
             <td>{{ taxon.ncbi_taxonomy_id|default:"-" }}</td>
             <td>{{ taxon.rank }}</td>
+            <td>
+              {% if taxon.parent %}
+                <a href="{% url 'database:taxon-detail' taxon.parent.pk %}">{{ taxon.parent.scientific_name }}</a>
+              {% else %}
+                -
+              {% endif %}
+            </td>
           </tr>
         {% empty %}
           <tr>
-            <td colspan="3" class="text-center text-secondary py-4">No taxa matched these filters.</td>
+            <td colspan="4" class="text-center text-secondary py-4">No taxa matched these filters.</td>
           </tr>
         {% endfor %}
       </tbody>

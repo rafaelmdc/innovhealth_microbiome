@@ -199,6 +199,7 @@ class ImportServiceTests(TestCase):
         self.assertFalse(row['review_required'])
         self.assertTrue(row['lineage'])
         self.assertIn('Faecalibacterium prausnitzii', row['lineage_summary'])
+        self.assertTrue(row['resolution_message'])
 
     def test_taxon_preview_page_shows_resolver_states(self):
         user_model = get_user_model()
@@ -222,6 +223,7 @@ class ImportServiceTests(TestCase):
                     'rank': 'species',
                     'ncbi_taxonomy_id': 1,
                     'resolution_status': 'resolved_exact_scientific',
+                    'resolution_message': 'resolved exact scientific',
                     'review_required': False,
                     'resolver_source': 'taxonbridge_name',
                     'lineage_summary': 'root > Auto Taxon',
@@ -232,6 +234,7 @@ class ImportServiceTests(TestCase):
                     'rank': 'species',
                     'ncbi_taxonomy_id': '',
                     'resolution_status': 'manual_review_required',
+                    'resolution_message': 'manual review required',
                     'review_required': True,
                     'resolver_source': 'taxonbridge_name',
                     'lineage_summary': 'Review Taxon',
@@ -242,6 +245,7 @@ class ImportServiceTests(TestCase):
                     'rank': 'genus',
                     'ncbi_taxonomy_id': '',
                     'resolution_status': 'taxonbridge_unavailable',
+                    'resolution_message': 'Taxonomy DB not found',
                     'review_required': False,
                     'resolver_source': 'local_fallback',
                     'lineage_summary': 'Fallback Taxon',
@@ -261,6 +265,7 @@ class ImportServiceTests(TestCase):
         self.assertContains(response, 'resolver-chip-auto')
         self.assertContains(response, 'resolver-chip-review')
         self.assertContains(response, 'resolver-chip-fallback')
+        self.assertContains(response, 'Taxonomy DB not found')
 
     def test_alpha_metric_import_sets_import_batch(self):
         preview = build_preview(

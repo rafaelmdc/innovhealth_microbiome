@@ -3,7 +3,7 @@ from django.db import IntegrityError
 from django.test import TestCase
 from django.urls import reverse
 
-from .models import Comparison, Group, MetadataValue, MetadataVariable, Taxon, QualitativeFinding, QuantitativeFinding, Study
+from .models import Comparison, Group, MetadataValue, MetadataVariable, Taxon, TaxonClosure, QualitativeFinding, QuantitativeFinding, Study
 
 
 class StudyModelTests(TestCase):
@@ -144,6 +144,11 @@ class BrowserViewTests(TestCase):
             source='Table 3',
         )
 
+    def _attach_taxon_to_branch(self, branch, leaf, *, depth=1):
+        TaxonClosure.objects.create(ancestor=branch, descendant=branch, depth=0)
+        TaxonClosure.objects.create(ancestor=leaf, descendant=leaf, depth=0)
+        TaxonClosure.objects.create(ancestor=branch, descendant=leaf, depth=depth)
+
     def test_browser_home_displays_new_cards(self):
         response = self.client.get(reverse('database:browser-home'))
 
@@ -195,8 +200,11 @@ class BrowserViewTests(TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'Faecalibacterium prausnitzii')
-        self.assertNotContains(response, 'Roseburia intestinalis')
+        self.assertEqual(response.context['page_obj'].paginator.count, 1)
+        self.assertEqual(
+            [finding.taxon.scientific_name for finding in response.context['findings']],
+            ['Faecalibacterium prausnitzii'],
+        )
 
     def test_quantitative_finding_list_filters_by_value_type(self):
         response = self.client.get(
@@ -206,6 +214,154 @@ class BrowserViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '0.62')
+
+    def test_qualitative_finding_list_filters_by_taxonomic_branch(self):
+        branch = Taxon.objects.create(scientific_name='Firmicutes', rank='phylum')
+        outside_taxon = Taxon.objects.create(scientific_name='Bacteroides fragilis', rank='species')
+        self._attach_taxon_to_branch(branch, self.taxon)
+        TaxonClosure.objects.create(ancestor=outside_taxon, descendant=outside_taxon, depth=0)
+        QualitativeFinding.objects.create(
+            comparison=self.comparison,
+            taxon=outside_taxon,
+            direction=QualitativeFinding.Direction.DEPLETED,
+            source='Table 4',
+        )
+
+        response = self.client.get(
+            reverse('database:qualitativefinding-list'),
+            {'branch': branch.pk},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['page_obj'].paginator.count, 1)
+        self.assertEqual(
+            [finding.taxon.scientific_name for finding in response.context['findings']],
+            ['Faecalibacterium prausnitzii'],
+        )
+
+    def test_quantitative_finding_list_filters_by_taxonomic_branch(self):
+        branch = Taxon.objects.create(scientific_name='Firmicutes', rank='phylum')
+        outside_taxon = Taxon.objects.create(scientific_name='Bacteroides fragilis', rank='species')
+        self._attach_taxon_to_branch(branch, self.taxon)
+        TaxonClosure.objects.create(ancestor=outside_taxon, descendant=outside_taxon, depth=0)
+        QuantitativeFinding.objects.create(
+            group=self.group_a,
+            taxon=outside_taxon,
+            value_type=QuantitativeFinding.ValueType.RELATIVE_ABUNDANCE,
+            value=0.12,
+            source='Table 5',
+        )
+
+        response = self.client.get(
+            reverse('database:quantitativefinding-list'),
+            {'branch': branch.pk},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['page_obj'].paginator.count, 1)
+        self.assertEqual(
+            [finding.taxon.scientific_name for finding in response.context['findings']],
+            ['Faecalibacterium prausnitzii'],
+        )
+
+    def test_taxon_detail_shows_subtree_context(self):
+        branch = Taxon.objects.create(
+            scientific_name='Faecalibacterium',
+            rank='genus',
+        )
+        child_taxon = Taxon.objects.create(
+            scientific_name='Faecalibacterium prausnitzii',
+            rank='species',
+            parent=branch,
+        )
+        self._attach_taxon_to_branch(branch, child_taxon)
+
+        response = self.client.get(reverse('database:taxon-detail', args=[branch.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Immediate Children')
+        self.assertContains(response, 'Descendants')
+        self.assertContains(response, 'Faecalibacterium prausnitzii')
+
+    def test_taxon_detail_lineage_starts_at_cellular_root_when_present(self):
+        root_taxon = Taxon.objects.create(
+            scientific_name='root',
+            rank='no rank',
+        )
+        cellular_root = Taxon.objects.create(
+            scientific_name='cellular organisms',
+            rank='cellular root',
+            parent=root_taxon,
+        )
+        branch = Taxon.objects.create(
+            scientific_name='Bacteria',
+            rank='domain',
+            parent=cellular_root,
+        )
+        self.taxon.parent = branch
+        self.taxon.save(update_fields=['parent'])
+        TaxonClosure.objects.create(ancestor=root_taxon, descendant=root_taxon, depth=0)
+        TaxonClosure.objects.create(ancestor=cellular_root, descendant=cellular_root, depth=0)
+        TaxonClosure.objects.create(ancestor=branch, descendant=branch, depth=0)
+        TaxonClosure.objects.create(ancestor=self.taxon, descendant=self.taxon, depth=0)
+        TaxonClosure.objects.create(ancestor=root_taxon, descendant=cellular_root, depth=1)
+        TaxonClosure.objects.create(ancestor=root_taxon, descendant=branch, depth=2)
+        TaxonClosure.objects.create(ancestor=root_taxon, descendant=self.taxon, depth=3)
+        TaxonClosure.objects.create(ancestor=cellular_root, descendant=branch, depth=1)
+        TaxonClosure.objects.create(ancestor=cellular_root, descendant=self.taxon, depth=2)
+        TaxonClosure.objects.create(ancestor=branch, descendant=self.taxon, depth=1)
+
+        response = self.client.get(reverse('database:taxon-detail', args=[self.taxon.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'cellular organisms')
+        self.assertNotContains(response, '>root<', html=True)
+
+    def test_taxon_list_shows_selected_branch_context(self):
+        branch = Taxon.objects.create(
+            scientific_name='Faecalibacterium',
+            rank='genus',
+        )
+        child_taxon = Taxon.objects.create(
+            scientific_name='Faecalibacterium duncaniae',
+            rank='species',
+            parent=branch,
+        )
+        self._attach_taxon_to_branch(branch, child_taxon)
+
+        response = self.client.get(reverse('database:taxon-list'), {'branch': branch.pk})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Subtree View')
+        self.assertContains(response, 'Branch detail')
+        self.assertContains(response, 'Branch qualitative findings')
+        self.assertContains(response, f'?branch={child_taxon.pk}')
+
+    def test_taxon_detail_shows_subtree_navigation_and_branch_counts(self):
+        branch = Taxon.objects.create(
+            scientific_name='Faecalibacterium',
+            rank='genus',
+        )
+        child_taxon = Taxon.objects.create(
+            scientific_name='Faecalibacterium child',
+            rank='species',
+            parent=branch,
+        )
+        self.taxon.parent = branch
+        self.taxon.save(update_fields=['parent'])
+        self._attach_taxon_to_branch(branch, self.taxon)
+        TaxonClosure.objects.create(ancestor=child_taxon, descendant=child_taxon, depth=0)
+        TaxonClosure.objects.create(ancestor=branch, descendant=child_taxon, depth=1)
+
+        response = self.client.get(reverse('database:taxon-detail', args=[self.taxon.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Explore Subtrees')
+        self.assertContains(response, 'Parent subtree: Faecalibacterium')
+        self.assertContains(response, 'Current subtree: Faecalibacterium prausnitzii')
+        self.assertContains(response, 'Open subtree')
+        self.assertContains(response, 'Branch qualitative findings (1)')
+        self.assertContains(response, 'Branch quantitative findings (1)')
 
     def test_detail_views_render(self):
         urls = [

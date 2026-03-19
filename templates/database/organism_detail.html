@@ -22,6 +22,10 @@
           <dd class="col-sm-7">{{ taxon.rank|default:"-" }}</dd>
           <dt class="col-sm-5">Parent</dt>
           <dd class="col-sm-7">{% if taxon.parent %}<a href="{% url 'database:taxon-detail' taxon.parent.pk %}">{{ taxon.parent.scientific_name }}</a>{% else %}-{% endif %}</dd>
+          <dt class="col-sm-5">Children</dt>
+          <dd class="col-sm-7">{{ child_taxa_count }}</dd>
+          <dt class="col-sm-5">Descendants</dt>
+          <dd class="col-sm-7">{{ descendant_count }}</dd>
           <dt class="col-sm-5">Studies</dt>
           <dd class="col-sm-7">{{ study_count }}</dd>
           <dt class="col-sm-5">Qualitative</dt>
@@ -43,17 +47,82 @@
       <div class="card shadow-sm detail-card mt-4">
         <div class="card-body">
           <h2 class="h5">Lineage</h2>
-          <p class="mb-0">
+          <ol class="lineage-list mb-0">
             {% for lineage_taxon in lineage %}
-              {% if not forloop.first %} &rarr; {% endif %}
-              <a href="{% url 'database:taxon-detail' lineage_taxon.pk %}">{{ lineage_taxon.scientific_name }}</a>
+              <li class="lineage-item">
+                <a class="lineage-link {% if lineage_taxon.pk == taxon.pk %}lineage-link-current{% endif %}" href="{% url 'database:taxon-detail' lineage_taxon.pk %}">
+                  {% if lineage_taxon.rank %}
+                    <span class="lineage-rank">{{ lineage_taxon.rank }}</span>
+                  {% endif %}
+                  <span class="lineage-name">{{ lineage_taxon.scientific_name }}</span>
+                </a>
+              </li>
             {% endfor %}
-          </p>
+          </ol>
+        </div>
+      </div>
+    {% endif %}
+    {% if taxon.parent or child_taxa %}
+      <div class="card shadow-sm detail-card mt-4">
+        <div class="card-body">
+          <h2 class="h5 mb-3">Explore Subtrees</h2>
+          <form method="get" action="{% url 'database:taxon-list' %}" class="subtree-jump-form">
+            <label class="form-label visually-hidden" for="id_branch_jump">Choose subtree</label>
+            <div class="subtree-jump-shell">
+              <select class="form-select" id="id_branch_jump" name="branch">
+                <option value="{{ taxon.pk }}">Current subtree: {{ taxon.scientific_name }}</option>
+                {% if taxon.parent %}
+                  <option value="{{ taxon.parent.pk }}">Parent subtree: {{ taxon.parent.scientific_name }}</option>
+                {% endif %}
+                {% if child_taxa %}
+                  <optgroup label="Child subtrees">
+                    {% for child in child_taxa %}
+                      <option value="{{ child.pk }}">Child subtree: {{ child.scientific_name }}</option>
+                    {% endfor %}
+                  </optgroup>
+                {% endif %}
+                {% if lineage|length > 1 %}
+                  <optgroup label="Ancestor subtrees">
+                    {% for lineage_taxon in lineage %}
+                      {% if lineage_taxon.pk != taxon.pk and lineage_taxon.pk != taxon.parent_id %}
+                        <option value="{{ lineage_taxon.pk }}">Ancestor subtree: {{ lineage_taxon.scientific_name }}</option>
+                      {% endif %}
+                    {% endfor %}
+                  </optgroup>
+                {% endif %}
+              </select>
+              <button class="btn btn-outline-secondary" type="submit">Open subtree</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    {% endif %}
+    {% if child_taxa %}
+      <div class="card shadow-sm detail-card mt-4">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+            <h2 class="h5 mb-0">Immediate Children</h2>
+            <a class="btn btn-outline-secondary btn-sm" href="{% url 'database:taxon-list' %}?branch={{ taxon.pk }}">Open subtree</a>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            {% for child in child_taxa %}
+              <a class="btn btn-outline-primary btn-sm" href="{% url 'database:taxon-detail' child.pk %}">{{ child.scientific_name }}</a>
+            {% endfor %}
+          </div>
         </div>
       </div>
     {% endif %}
   </div>
   <div class="col-lg-8">
+    <div class="card shadow-sm data-shell mb-4">
+      <div class="card-body d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-primary btn-sm" href="{% url 'database:qualitativefinding-list' %}?taxon={{ taxon.pk }}">Leaf qualitative findings ({{ qualitative_count }})</a>
+        <a class="btn btn-outline-primary btn-sm" href="{% url 'database:quantitativefinding-list' %}?taxon={{ taxon.pk }}">Leaf quantitative findings ({{ quantitative_count }})</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{% url 'database:qualitativefinding-list' %}?branch={{ taxon.pk }}">Branch qualitative findings ({{ branch_qualitative_count }})</a>
+        <a class="btn btn-outline-secondary btn-sm" href="{% url 'database:quantitativefinding-list' %}?branch={{ taxon.pk }}">Branch quantitative findings ({{ branch_quantitative_count }})</a>
+      </div>
+    </div>
+
     <div class="card shadow-sm data-shell mb-4">
       <div class="card-body">
         <h2 class="h5">Recent qualitative findings</h2>

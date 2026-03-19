@@ -278,6 +278,9 @@ class TaxonListView(BrowserListView):
     }
     default_ordering = ('scientific_name',)
 
+    def get_queryset(self):
+        return super().get_queryset().select_related('parent')
+
     def apply_filters(self, queryset):
         rank = self.request.GET.get('rank', '').strip()
         branch_id = self.request.GET.get('branch', '').strip()
@@ -291,10 +294,36 @@ class TaxonListView(BrowserListView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        context['current_rank'] = self.request.GET.get('rank', '').strip()
-        context['current_branch'] = self.request.GET.get('branch', '').strip()
+        current_rank = self.request.GET.get('rank', '').strip()
+        current_branch = self.request.GET.get('branch', '').strip()
+        selected_branch = None
+        selected_branch_lineage = []
+        selected_branch_children = []
+        selected_branch_descendant_count = 0
+
+        if current_branch:
+            selected_branch = Taxon.objects.select_related('parent').filter(pk=current_branch).first()
+            if selected_branch:
+                selected_branch_lineage = [
+                    path.ancestor
+                    for path in TaxonClosure.objects.filter(descendant=selected_branch)
+                    .select_related('ancestor')
+                    .order_by('-depth')
+                ]
+                selected_branch_children = list(selected_branch.children.order_by('rank', 'scientific_name')[:12])
+                selected_branch_descendant_count = TaxonClosure.objects.filter(
+                    ancestor=selected_branch,
+                    depth__gt=0,
+                ).count()
+
+        context['current_rank'] = current_rank
+        context['current_branch'] = current_branch
         context['ranks'] = Taxon.objects.order_by('rank').values_list('rank', flat=True).distinct()
         context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
+        context['selected_branch_taxon'] = selected_branch
+        context['selected_branch_lineage'] = selected_branch_lineage
+        context['selected_branch_children'] = selected_branch_children
+        context['selected_branch_descendant_count'] = selected_branch_descendant_count
         return context
 
 
@@ -303,9 +332,29 @@ class TaxonDetailView(DetailView):
     template_name = 'database/organism_detail.html'
     context_object_name = 'taxon'
 
+    @staticmethod
+    def _trim_display_lineage(lineage_nodes):
+        cellular_root_index = next(
+            (
+                index
+                for index, node in enumerate(lineage_nodes)
+                if node.scientific_name.lower() == 'cellular organisms'
+            ),
+            None,
+        )
+        if cellular_root_index is not None:
+            return lineage_nodes[cellular_root_index:]
+        if lineage_nodes and lineage_nodes[0].scientific_name.lower() == 'root':
+            return lineage_nodes[1:]
+        return lineage_nodes
+
+    def get_queryset(self):
+        return Taxon.objects.select_related('parent')
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         taxon = self.object
+        children = taxon.children.order_by('rank', 'scientific_name')
         qualitative = QualitativeFinding.objects.filter(taxon=taxon).select_related(
             'comparison__study',
             'comparison__group_a',
@@ -324,10 +373,20 @@ class TaxonDetailView(DetailView):
             finding.group.study_id
             for finding in quantitative
         }
+        lineage_nodes = [path.ancestor for path in lineage]
         context['qualitative_count'] = qualitative.count()
         context['quantitative_count'] = quantitative.count()
         context['study_count'] = len(study_ids)
-        context['lineage'] = [path.ancestor for path in lineage]
+        context['lineage'] = self._trim_display_lineage(lineage_nodes)
+        context['child_taxa'] = children[:12]
+        context['child_taxa_count'] = children.count()
+        context['descendant_count'] = TaxonClosure.objects.filter(ancestor=taxon, depth__gt=0).count()
+        context['branch_qualitative_count'] = (
+            QualitativeFinding.objects.filter(taxon__closure_ancestors__ancestor=taxon).distinct().count()
+        )
+        context['branch_quantitative_count'] = (
+            QuantitativeFinding.objects.filter(taxon__closure_ancestors__ancestor=taxon).distinct().count()
+        )
         context['recent_qualitative_findings'] = qualitative.order_by('comparison__label', 'direction')[:10]
         context['recent_quantitative_findings'] = quantitative.order_by('group__name', 'value_type')[:10]
         return context
@@ -370,18 +429,28 @@ class QualitativeFindingListView(BrowserListView):
     def apply_filters(self, queryset):
         study_id = self.request.GET.get('study', '').strip()
         direction = self.request.GET.get('direction', '').strip()
+        taxon_id = self.request.GET.get('taxon', '').strip()
+        branch_id = self.request.GET.get('branch', '').strip()
         if study_id:
             queryset = queryset.filter(comparison__study_id=study_id)
         if direction:
             queryset = queryset.filter(direction=direction)
+        if taxon_id:
+            queryset = queryset.filter(taxon_id=taxon_id)
+        if branch_id:
+            queryset = queryset.filter(taxon__closure_ancestors__ancestor_id=branch_id).distinct()
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['current_study'] = self.request.GET.get('study', '').strip()
         context['current_direction'] = self.request.GET.get('direction', '').strip()
+        context['current_taxon'] = self.request.GET.get('taxon', '').strip()
+        context['current_branch'] = self.request.GET.get('branch', '').strip()
         context['studies'] = Study.objects.order_by('title')
         context['direction_choices'] = QualitativeFinding.Direction.choices
+        context['taxa'] = Taxon.objects.order_by('scientific_name')[:200]
+        context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
         return context
 
 
@@ -429,18 +498,28 @@ class QuantitativeFindingListView(BrowserListView):
     def apply_filters(self, queryset):
         study_id = self.request.GET.get('study', '').strip()
         value_type = self.request.GET.get('value_type', '').strip()
+        taxon_id = self.request.GET.get('taxon', '').strip()
+        branch_id = self.request.GET.get('branch', '').strip()
         if study_id:
             queryset = queryset.filter(group__study_id=study_id)
         if value_type:
             queryset = queryset.filter(value_type=value_type)
+        if taxon_id:
+            queryset = queryset.filter(taxon_id=taxon_id)
+        if branch_id:
+            queryset = queryset.filter(taxon__closure_ancestors__ancestor_id=branch_id).distinct()
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['current_study'] = self.request.GET.get('study', '').strip()
         context['current_value_type'] = self.request.GET.get('value_type', '').strip()
+        context['current_taxon'] = self.request.GET.get('taxon', '').strip()
+        context['current_branch'] = self.request.GET.get('branch', '').strip()
         context['studies'] = Study.objects.order_by('title')
         context['value_type_choices'] = QuantitativeFinding.ValueType.choices
+        context['taxa'] = Taxon.objects.order_by('scientific_name')[:200]
+        context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
         return context
 
 

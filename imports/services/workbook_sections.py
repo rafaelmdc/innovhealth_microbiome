@@ -476,6 +476,7 @@ def build_taxon_section(*, sheet, batch_name, file_name, state):
                     'lineage': resolution['lineage'],
                     'lineage_summary': resolution['lineage_summary'],
                     'resolution_status': resolution['resolution_status'],
+                    'resolution_message': resolution['resolution_message'],
                     'review_required': resolution['review_required'],
                     'resolver_source': resolution['resolver_source'],
                 }

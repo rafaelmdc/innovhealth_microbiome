@@ -44,4 +44,4 @@ def resolver_label(mapping):
 def resolver_detail(mapping):
     if not mapping:
         return ''
-    return mapping.get('resolution_status', '').replace('_', ' ')
+    return mapping.get('resolution_message') or mapping.get('resolution_status', '').replace('_', ' ')

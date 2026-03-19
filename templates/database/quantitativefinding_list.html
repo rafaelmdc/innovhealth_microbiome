@@ -15,11 +15,11 @@
 
 <form method="get" class="card card-body shadow-sm filter-card mb-4">
   <div class="row g-3">
-    <div class="col-md-4">
+    <div class="col-md-3">
       <label class="form-label" for="id_q">Search</label>
       <input class="form-control" id="id_q" type="text" name="q" value="{{ current_query }}" placeholder="Group, study, taxon, source">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label" for="id_study">Study</label>
       <select class="form-select" id="id_study" name="study">
         <option value="">All studies</option>
@@ -28,7 +28,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
       <label class="form-label" for="id_value_type">Value Type</label>
       <select class="form-select" id="id_value_type" name="value_type">
         <option value="">All types</option>
@@ -38,6 +38,24 @@
       </select>
     </div>
     <div class="col-md-2">
+      <label class="form-label" for="id_taxon">Taxon</label>
+      <select class="form-select" id="id_taxon" name="taxon">
+        <option value="">All taxa</option>
+        {% for taxon in taxa %}
+          <option value="{{ taxon.pk }}" {% if current_taxon == taxon.pk|stringformat:"s" %}selected{% endif %}>{{ taxon.scientific_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label" for="id_branch">Branch</label>
+      <select class="form-select" id="id_branch" name="branch">
+        <option value="">All branches</option>
+        {% for taxon in branch_taxa %}
+          <option value="{{ taxon.pk }}" {% if current_branch == taxon.pk|stringformat:"s" %}selected{% endif %}>{{ taxon.scientific_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-1">
       <label class="form-label" for="id_order_by">Sort</label>
       <select class="form-select" id="id_order_by" name="order_by">
         <option value="">Default</option>
@@ -71,7 +89,7 @@
           <tr>
             <td><a href="{% url 'database:quantitativefinding-detail' finding.pk %}">{{ finding.group.name }}</a></td>
             <td><a href="{% url 'database:study-detail' finding.group.study.pk %}">{{ finding.group.study.title }}</a></td>
-            <td>{{ finding.taxon.scientific_name }}</td>
+            <td><a href="{% url 'database:taxon-detail' finding.taxon.pk %}">{{ finding.taxon.scientific_name }}</a></td>
             <td>{{ finding.get_value_type_display }}</td>
             <td>{{ finding.value }}</td>
             <td>{{ finding.source }}</td>
