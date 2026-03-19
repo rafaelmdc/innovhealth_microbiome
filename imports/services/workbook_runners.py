@@ -137,6 +137,8 @@ def run_workbook_taxon_import(valid_rows, batch):
     """Upsert taxa from workbook preview rows."""
     applied_count = 0
     for row in valid_rows:
+        if row.get('review_required'):
+            continue
         if row.get('lineage'):
             upsert_taxon_lineage(
                 row['lineage'],

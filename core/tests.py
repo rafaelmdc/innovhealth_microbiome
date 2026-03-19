@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
 
-from database.models import Comparison, Group, Taxon, QualitativeFinding, QuantitativeFinding, Study
+from database.models import Comparison, Group, QualitativeFinding, QuantitativeFinding, Study, Taxon, TaxonClosure
 
 
 class HomeViewTests(TestCase):
@@ -73,16 +73,49 @@ class GraphViewTests(TestCase):
             scientific_name='Faecalibacterium prausnitzii',
             rank='species',
         )
+        self.organism_a_genus = Taxon.objects.create(
+            ncbi_taxonomy_id=100,
+            scientific_name='Faecalibacterium',
+            rank='genus',
+        )
+        self.organism_a.parent = self.organism_a_genus
+        self.organism_a.save(update_fields=['parent'])
         self.organism_b = Taxon.objects.create(
             ncbi_taxonomy_id=202,
             scientific_name='Bacteroides fragilis',
             rank='species',
         )
+        self.organism_b_genus = Taxon.objects.create(
+            ncbi_taxonomy_id=200,
+            scientific_name='Bacteroides',
+            rank='genus',
+        )
+        self.organism_b.parent = self.organism_b_genus
+        self.organism_b.save(update_fields=['parent'])
         self.organism_c = Taxon.objects.create(
             ncbi_taxonomy_id=303,
             scientific_name='Roseburia intestinalis',
             rank='species',
         )
+        self.organism_c_genus = Taxon.objects.create(
+            ncbi_taxonomy_id=300,
+            scientific_name='Roseburia',
+            rank='genus',
+        )
+        self.organism_c.parent = self.organism_c_genus
+        self.organism_c.save(update_fields=['parent'])
+        self.family = Taxon.objects.create(
+            ncbi_taxonomy_id=999,
+            scientific_name='Ruminococcaceae',
+            rank='family',
+        )
+        self.organism_a_genus.parent = self.family
+        self.organism_a_genus.save(update_fields=['parent'])
+        self.organism_c_genus.parent = self.family
+        self.organism_c_genus.save(update_fields=['parent'])
+        self._attach_lineage(self.family, self.organism_a_genus, self.organism_a)
+        self._attach_lineage(self.family, self.organism_c_genus, self.organism_c)
+        self._attach_lineage(self.organism_b_genus, self.organism_b)
         QualitativeFinding.objects.create(
             comparison=self.comparison_a,
             taxon=self.organism_a,
@@ -101,6 +134,27 @@ class GraphViewTests(TestCase):
             direction=QualitativeFinding.Direction.ENRICHED,
             source='Table 4',
         )
+
+    def _attach_lineage(self, *taxa):
+        for depth, ancestor in enumerate(reversed(taxa)):
+            TaxonClosure.objects.get_or_create(
+                ancestor=ancestor,
+                descendant=taxa[-1],
+                defaults={'depth': len(taxa) - depth - 1},
+            )
+        for taxon in taxa:
+            TaxonClosure.objects.get_or_create(
+                ancestor=taxon,
+                descendant=taxon,
+                defaults={'depth': 0},
+            )
+        for descendant_index, descendant in enumerate(taxa[1:], start=1):
+            for ancestor_index, ancestor in enumerate(taxa[:descendant_index]):
+                TaxonClosure.objects.get_or_create(
+                    ancestor=ancestor,
+                    descendant=descendant,
+                    defaults={'depth': descendant_index - ancestor_index},
+                )
 
     def test_graph_page_renders_summary(self):
         response = self.client.get(reverse('core:graph'))
@@ -124,6 +178,35 @@ class GraphViewTests(TestCase):
         self.assertEqual(response.context['graph_data']['summary']['finding_count'], 2)
         self.assertEqual(response.context['graph_data']['summary']['enriched_taxon_count'], 2)
         self.assertEqual(response.context['graph_data']['summary']['depleted_taxon_count'], 0)
+
+    def test_graph_page_groups_findings_by_rank(self):
+        response = self.client.get(reverse('core:graph'), {'group_rank': 'genus'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['graph_data']['summary']['grouping_rank'], 'genus')
+        self.assertEqual(response.context['graph_data']['summary']['taxon_count'], 3)
+        node_labels = {node['data']['label'] for node in response.context['graph_data']['nodes'] if node['data']['node_type'] == 'taxon'}
+        self.assertIn('Faecalibacterium', node_labels)
+        self.assertIn('Bacteroides', node_labels)
+        self.assertIn('Roseburia', node_labels)
+        self.assertNotIn('Faecalibacterium prausnitzii', node_labels)
+
+    def test_graph_page_filters_by_taxonomic_branch(self):
+        response = self.client.get(reverse('core:graph'), {'branch': self.family.pk, 'group_rank': 'genus'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['graph_data']['summary']['edge_count'], 2)
+        node_labels = {node['data']['label'] for node in response.context['graph_data']['nodes'] if node['data']['node_type'] == 'taxon'}
+        self.assertIn('Faecalibacterium', node_labels)
+        self.assertIn('Roseburia', node_labels)
+        self.assertNotIn('Bacteroides', node_labels)
+
+    def test_graph_page_reports_skipped_rollups_when_rank_is_missing(self):
+        response = self.client.get(reverse('core:graph'), {'group_rank': 'phylum'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['graph_data']['summary']['skipped_rollup_count'], 3)
+        self.assertContains(response, '3 findings omitted because no ancestor exists at the selected rank.')
 
 
 class StaffHomeViewTests(TestCase):

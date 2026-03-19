@@ -153,6 +153,14 @@
     <p><strong>Required columns:</strong> {{ preview.required_columns|join:", " }}</p>
   {% endif %}
 
+  {% if review_required_count %}
+    <div class="messagelist">
+      <div class="warning">
+        {{ review_required_count }} taxon row{{ review_required_count|pluralize }} still require review and will be skipped on confirm, along with any dependent workbook findings.
+      </div>
+    </div>
+  {% endif %}
+
   {% if preview.import_type == 'excel_workbook' %}
     {% if preview.skipped_rows %}
       <h2>Skipped Rows</h2>

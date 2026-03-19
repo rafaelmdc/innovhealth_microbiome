@@ -8,7 +8,7 @@
   <div>
     <h1 class="mb-1">Disease Network</h1>
     <p class="text-secondary mb-0">
-      Explore qualitative findings as a three-column network: enriched taxa, diseases, and depleted taxa.
+      Explore qualitative findings as a lineage-aware network with branch filters and taxon rank rollups.
     </p>
   </div>
   <a class="btn btn-outline-secondary" href="{% url 'database:qualitativefinding-list' %}">Open qualitative browser</a>
@@ -26,6 +26,14 @@
       </select>
     </div>
     <div class="col-md-2">
+      <label class="form-label" for="id_group_rank">Taxon level</label>
+      <select class="form-select" id="id_group_rank" name="group_rank">
+        {% for value, label in grouping_rank_choices %}
+          <option value="{{ value }}" {% if current_group_rank == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
       <label class="form-label" for="id_direction">Direction</label>
       <select class="form-select" id="id_direction" name="direction">
         <option value="">All directions</option>
@@ -34,11 +42,20 @@
         {% endfor %}
       </select>
     </div>
+    <div class="col-md-2">
+      <label class="form-label" for="id_branch">Branch</label>
+      <select class="form-select" id="id_branch" name="branch">
+        <option value="">All branches</option>
+        {% for taxon in branch_taxa %}
+          <option value="{{ taxon.pk }}" {% if current_branch == taxon.pk|stringformat:"s" %}selected{% endif %}>{{ taxon.scientific_name }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <div class="col-md-3">
       <label class="form-label" for="id_disease">Disease query</label>
       <input class="form-control" id="id_disease" type="text" name="disease" value="{{ current_disease }}" placeholder="Condition or target group">
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
       <label class="form-label" for="id_taxon">Taxon query</label>
       <input class="form-control" id="id_taxon" type="text" name="taxon" value="{{ current_taxon }}" placeholder="Scientific name or rank">
     </div>
@@ -61,7 +78,7 @@
   <div class="col-md-3">
     <div class="card shadow-sm metric-card">
       <div class="card-body">
-        <p class="text-uppercase text-secondary small mb-2">Enriched Taxa</p>
+        <p class="text-uppercase text-secondary small mb-2">Enriched {{ current_group_rank|title }}</p>
         <p class="display-6 mb-0">{{ graph_data.summary.enriched_taxon_count }}</p>
       </div>
     </div>
@@ -69,7 +86,7 @@
   <div class="col-md-3">
     <div class="card shadow-sm metric-card">
       <div class="card-body">
-        <p class="text-uppercase text-secondary small mb-2">Depleted Taxa</p>
+        <p class="text-uppercase text-secondary small mb-2">Depleted {{ current_group_rank|title }}</p>
         <p class="display-6 mb-0">{{ graph_data.summary.depleted_taxon_count }}</p>
       </div>
     </div>
@@ -84,6 +101,12 @@
   </div>
 </div>
 
+{% if graph_data.summary.skipped_rollup_count %}
+  <div class="alert alert-secondary empty-state mb-4">
+    {{ graph_data.summary.skipped_rollup_count }} finding{{ graph_data.summary.skipped_rollup_count|pluralize }} omitted because no ancestor exists at the selected rank.
+  </div>
+{% endif %}
+
 {% if graph_data.summary.edge_count %}
   <div class="card shadow-sm graph-shell mb-4">
     <div class="card-body">
@@ -91,7 +114,7 @@
         <div>
           <h2 class="h5 mb-1">Interactive Network</h2>
           <p class="text-secondary mb-0">
-            Click any disease or taxon to isolate its local neighborhood. Click empty space to reset.
+            Grouped at the <strong>{{ current_group_rank }}</strong> level{% if current_branch_taxon %} within the <strong>{{ current_branch_taxon.scientific_name }}</strong> branch{% endif %}. Click any disease or taxon to isolate its local neighborhood.
           </p>
         </div>
         <button class="btn btn-outline-secondary btn-sm align-self-start align-self-lg-auto" type="button" id="graph-reset-focus">
@@ -99,9 +122,9 @@
         </button>
       </div>
       <div class="graph-stage">
-        <div class="graph-axis graph-axis-left">Enriched taxa</div>
+        <div class="graph-axis graph-axis-left">Enriched {{ current_group_rank }}</div>
         <div class="graph-axis graph-axis-center">Diseases</div>
-        <div class="graph-axis graph-axis-right">Depleted taxa</div>
+        <div class="graph-axis graph-axis-right">Depleted {{ current_group_rank }}</div>
         <div
           id="graph-canvas"
           style="height: {{ graph_data.summary.layout_height }}px; width: {{ graph_data.summary.layout_width }}px;"
@@ -114,16 +137,17 @@
     <div class="card-body">
       <h2 class="h5">Current graph payload</h2>
       <p class="text-secondary">
-        Diseases stay in the center. Enriched taxa connect from the left, depleted taxa from the right.
+        Diseases stay in the center. Enriched taxa connect from the left, depleted taxa from the right, and edges aggregate leaf-level findings into the selected rank.
       </p>
       <div class="table-responsive">
         <table class="table table-sm mb-0">
           <thead>
             <tr>
-              <th>Enriched Taxon</th>
+              <th>Enriched {{ current_group_rank|title }}</th>
               <th>Disease</th>
-              <th>Depleted Taxon</th>
+              <th>Depleted {{ current_group_rank|title }}</th>
               <th>Findings</th>
+              <th>Leaf taxa</th>
               <th>Sources</th>
             </tr>
           </thead>
@@ -134,6 +158,7 @@
                 <td>{{ edge.data.target_label }}</td>
                 <td>{% if edge.data.column == "depleted" %}{{ edge.data.source_label }}{% endif %}</td>
                 <td>{{ edge.data.finding_count }}</td>
+                <td>{{ edge.data.leaf_taxon_count }}</td>
                 <td>{{ edge.data.source_count }}</td>
               </tr>
             {% endfor %}

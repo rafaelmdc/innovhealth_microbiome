@@ -6,7 +6,7 @@ from django.views.generic import TemplateView
 
 from database.models import Comparison, Group, QualitativeFinding, QuantitativeFinding, Study, Taxon
 
-from .graph import build_disease_graph
+from .graph import GRAPH_GROUPING_CHOICES, build_disease_graph
 from .model_diagram import render_model_diagram_svg
 
 
@@ -85,6 +85,11 @@ class ModelDiagramView(LoginRequiredMixin, TemplateView):
 class GraphView(TemplateView):
     template_name = 'core/graph.html'
 
+    def get_grouping_rank(self):
+        grouping_rank = self.request.GET.get('group_rank', '').strip() or 'leaf'
+        valid_ranks = {value for value, _label in GRAPH_GROUPING_CHOICES}
+        return grouping_rank if grouping_rank in valid_ranks else 'leaf'
+
     def get_queryset(self):
         queryset = QualitativeFinding.objects.select_related(
             'comparison',
@@ -98,6 +103,7 @@ class GraphView(TemplateView):
         direction = self.request.GET.get('direction', '').strip()
         disease_query = self.request.GET.get('disease', '').strip() or self.request.GET.get('comparison', '').strip()
         taxon_query = self.request.GET.get('taxon', '').strip()
+        branch_id = self.request.GET.get('branch', '').strip()
 
         if study_id:
             queryset = queryset.filter(comparison__study_id=study_id)
@@ -114,17 +120,26 @@ class GraphView(TemplateView):
                 Q(taxon__scientific_name__icontains=taxon_query)
                 | Q(taxon__rank__icontains=taxon_query)
             )
+        if branch_id:
+            queryset = queryset.filter(taxon__closure_ancestors__ancestor_id=branch_id).distinct()
 
         return queryset.order_by('comparison__label', 'taxon__scientific_name')
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        graph_data = build_disease_graph(self.get_queryset())
+        grouping_rank = self.get_grouping_rank()
+        graph_data = build_disease_graph(self.get_queryset(), grouping_rank=grouping_rank)
+        branch_id = self.request.GET.get('branch', '').strip()
         context['graph_data'] = graph_data
         context['studies'] = Study.objects.order_by('title')
         context['direction_choices'] = QualitativeFinding.Direction.choices
+        context['grouping_rank_choices'] = GRAPH_GROUPING_CHOICES
+        context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
         context['current_study'] = self.request.GET.get('study', '').strip()
         context['current_direction'] = self.request.GET.get('direction', '').strip()
         context['current_disease'] = self.request.GET.get('disease', '').strip() or self.request.GET.get('comparison', '').strip()
         context['current_taxon'] = self.request.GET.get('taxon', '').strip()
+        context['current_branch'] = branch_id
+        context['current_group_rank'] = grouping_rank
+        context['current_branch_taxon'] = Taxon.objects.filter(pk=branch_id).first() if branch_id else None
         return context

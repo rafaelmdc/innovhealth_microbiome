@@ -448,6 +448,8 @@ def build_taxon_section(*, sheet, batch_name, file_name, state):
                 notes=notes,
                 aliases=[raw_name] if raw_name.lower() != scientific_name.lower() else [],
             )
+            if resolution['review_required']:
+                state['review_required_taxon_ids'].add(organism_id)
 
             state['taxon_refs'][organism_id] = {
                 'scientific_name': resolution['scientific_name'],
@@ -531,6 +533,15 @@ def build_qualitative_section(*, sheet, batch_name, file_name, state):
                         'section': 'qualitative_findings',
                         'row_number': row_number,
                         'message': f'Skipped because taxon {organism_id} is not resolved.',
+                    }
+                )
+                continue
+            if organism_id in state['review_required_taxon_ids']:
+                state['skipped_rows'].append(
+                    {
+                        'section': 'qualitative_findings',
+                        'row_number': row_number,
+                        'message': f'Skipped because taxon {organism_id} still requires review.',
                     }
                 )
                 continue
@@ -645,6 +656,15 @@ def build_quantitative_section(*, sheet, batch_name, file_name, state):
                         'section': 'quantitative_findings',
                         'row_number': row_number,
                         'message': f'Skipped because taxon {organism_id} is not resolved.',
+                    }
+                )
+                continue
+            if organism_id in state['review_required_taxon_ids']:
+                state['skipped_rows'].append(
+                    {
+                        'section': 'quantitative_findings',
+                        'row_number': row_number,
+                        'message': f'Skipped because taxon {organism_id} still requires review.',
                     }
                 )
                 continue

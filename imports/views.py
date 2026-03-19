@@ -111,6 +111,21 @@ PREVIEW_COLUMNS = {
 }
 
 
+def _count_review_required_taxa(preview):
+    if not preview:
+        return 0
+
+    count = 0
+    if preview.get('import_type') == 'taxon':
+        count += sum(1 for row in preview.get('valid_rows', []) if row.get('review_required'))
+
+    for section in preview.get('sections', []):
+        if section.get('import_type') != 'taxon':
+            continue
+        count += sum(1 for row in section.get('valid_rows', []) if row.get('review_required'))
+    return count
+
+
 @staff_member_required
 @require_http_methods(['GET', 'POST'])
 def upload_csv(request):
@@ -190,6 +205,7 @@ def preview_csv(request):
             'import_label': IMPORT_TYPE_LABELS.get(import_type, import_type.replace('_', ' ').title()),
             'preview_columns': preview_columns,
             'section_previews': section_previews,
+            'review_required_count': _count_review_required_taxa(preview),
         },
     )
 

@@ -1,4 +1,5 @@
 from io import BytesIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -266,6 +267,90 @@ class ImportServiceTests(TestCase):
         self.assertContains(response, 'resolver-chip-review')
         self.assertContains(response, 'resolver-chip-fallback')
         self.assertContains(response, 'Taxonomy DB not found')
+
+    def test_confirm_import_skips_taxa_that_still_require_review(self):
+        user_model = get_user_model()
+        user_model.objects.create_user(
+            username='reviewstaff',
+            password='testpass123',
+            is_staff=True,
+        )
+        self.client.login(username='reviewstaff', password='testpass123')
+        session = self.client.session
+        session['imports_preview'] = {
+            'batch_name': 'Blocked review batch',
+            'import_type': 'taxon',
+            'required_columns': ['scientific_name', 'rank'],
+            'file_name': 'taxa.csv',
+            'total_rows': 1,
+            'valid_rows': [
+                {
+                    'row_number': 2,
+                    'scientific_name': 'Review Taxon',
+                    'rank': 'species',
+                    'ncbi_taxonomy_id': '',
+                    'resolution_status': 'manual_review_required',
+                    'resolution_message': 'manual review required',
+                    'review_required': True,
+                    'resolver_source': 'taxonbridge_name',
+                    'lineage_summary': 'Review Taxon',
+                },
+            ],
+            'errors': [],
+            'duplicates': [],
+        }
+        session.save()
+
+        preview_response = self.client.get(reverse('imports:preview'))
+        confirm_response = self.client.post(reverse('imports:confirm'), follow=True)
+
+        self.assertEqual(preview_response.status_code, 200)
+        self.assertContains(
+            preview_response,
+            '1 taxon row still require review and will be skipped on confirm, along with any dependent workbook findings.',
+        )
+        self.assertEqual(confirm_response.status_code, 200)
+        self.assertEqual(ImportBatch.objects.count(), 1)
+        batch = ImportBatch.objects.get()
+        self.assertEqual(batch.success_count, 0)
+        self.assertFalse(Taxon.objects.filter(scientific_name='Review Taxon').exists())
+
+    def test_excel_workbook_preview_skips_findings_for_taxa_that_require_review(self):
+        with patch(
+            'imports.services.workbook_sections.build_taxon_preview_payload',
+            return_value={
+                'scientific_name': 'Blautia',
+                'ncbi_taxonomy_id': 1234,
+                'rank': 'genus',
+                'notes': 'Taxon note',
+                'aliases': ['Blautia sp.'],
+                'lineage': [{'ncbi_taxonomy_id': 1234, 'scientific_name': 'Blautia', 'rank': 'genus'}],
+                'lineage_summary': 'Blautia',
+                'resolution_status': 'manual_review_required',
+                'resolution_message': 'manual review required',
+                'review_required': True,
+                'resolver_source': 'taxonbridge_name',
+            },
+        ):
+            preview = build_preview(
+                file_name='curation.xlsx',
+                content=self._build_workbook_bytes(),
+                import_type='excel_workbook',
+                batch_name='Workbook batch',
+            )
+
+        self.assertEqual(preview.import_type, 'excel_workbook')
+        self.assertTrue(
+            any('still requires review' in row['message'] for row in preview.skipped_rows)
+        )
+        qualitative_section = next(
+            section for section in preview.sections if section['import_type'] == 'qualitative_finding'
+        )
+        quantitative_section = next(
+            section for section in preview.sections if section['import_type'] == 'quantitative_finding'
+        )
+        self.assertEqual(qualitative_section['valid_rows'], [])
+        self.assertEqual(quantitative_section['valid_rows'], [])
 
     def test_alpha_metric_import_sets_import_batch(self):
         preview = build_preview(

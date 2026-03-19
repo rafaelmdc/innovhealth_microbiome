@@ -12,6 +12,7 @@ def build_workbook_state():
         'comparison_refs': {},
         'taxon_refs': {},
         'unresolved_taxon_ids': set(),
+        'review_required_taxon_ids': set(),
         'raw_metadata_values': [],
         'skipped_rows': [],
     }

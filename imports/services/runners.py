@@ -17,7 +17,10 @@ from .taxonomy import resolve_and_upsert_taxon, upsert_taxon_lineage
 
 def run_taxon_import(valid_rows, batch):
     """Create taxon records from validated CSV rows."""
+    applied_count = 0
     for row in valid_rows:
+        if row.get('review_required'):
+            continue
         if row.get('lineage'):
             upsert_taxon_lineage(
                 row['lineage'],
@@ -32,7 +35,8 @@ def run_taxon_import(valid_rows, batch):
                 notes=row['notes'],
                 aliases=row.get('aliases', ()),
             )
-    return len(valid_rows)
+        applied_count += 1
+    return applied_count
 
 
 def run_study_import(valid_rows, batch):
