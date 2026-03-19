@@ -82,16 +82,16 @@ def resolve_comparison(study_doi, study_title, group_a_name, group_b_name, label
     study = resolve_study(study_doi, study_title)
     if not study:
         return None
-    return (
-        Comparison.objects.filter(
-            study=study,
-            group_a__name=group_a_name,
-            group_b__name=group_b_name,
-            label=label,
-        )
-        .select_related('study', 'group_a', 'group_b')
-        .first()
+    queryset = Comparison.objects.filter(
+        study=study,
+        group_a__name=group_a_name,
+        group_b__name=group_b_name,
     )
+    if label:
+        comparison = queryset.filter(label=label).select_related('study', 'group_a', 'group_b').first()
+        if comparison:
+            return comparison
+    return queryset.select_related('study', 'group_a', 'group_b').first()
 
 
 def resolve_taxon_reference(scientific_name, ncbi_taxonomy_id):

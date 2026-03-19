@@ -1,5 +1,25 @@
 # Taxonomy Redesign Plan
 
+## Current Status
+
+Implemented in the current prototype:
+
+- Phase 1: flat taxonomy replaced by `Taxon`, `TaxonClosure`, and `TaxonName`
+- Phase 2: findings and admin repointed from `organism` to `taxon`
+- Phase 3: taxonomy import helpers and resolver integration added
+- Phase 4: preview-first CSV/workbook taxon resolution added
+- Phase 5: lineage-aware browser filtering and taxon detail lineage views added
+- Phase 6: graph branch filtering and grouping-rank rollups added
+
+Prototype stabilization already applied:
+
+- review-required taxon rows are reported in preview and skipped on confirm
+- dependent workbook findings that reference those taxon IDs are skipped during preview
+- exact matches against existing local curated taxa are accepted as local taxonomy resolutions for repeated workbook upserts
+- grouped graph views report how many findings were omitted because no ancestor exists at the selected rank
+
+Current focus is no longer “implement Phase 1 first.” The core taxonomy redesign is already active in the codebase.
+
 ## Goal
 
 Redesign the taxonomy layer so the database can:
@@ -414,6 +434,7 @@ Deliverable:
 - add tests for rank rollup behavior
 - add tests for branch filtering
 - add tests for graph aggregation by rank
+- keep prototype hardening narrow and focused on the active import and graph workflow
 
 Deliverable:
 
@@ -421,6 +442,8 @@ Deliverable:
 
 ## Immediate Next Step
 
-Implement Phase 1 first.
+Keep the current prototype path reliable:
 
-Because the database can be wiped, the correct next move is to replace the flat taxonomy model outright rather than attempting compatibility shims.
+- preserve preview-first taxonomy writes
+- keep skip-and-report behavior for review-required workbook taxa
+- extend tests only where active import or graph behavior is still changing

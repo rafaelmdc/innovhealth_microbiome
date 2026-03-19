@@ -39,6 +39,22 @@ Optional extensions remain:
 7. comparison graph
 8. refinement and tests
 
+## Current prototype status
+
+Implemented:
+
+- taxonomy-first schema centered on `Taxon`, `TaxonClosure`, and `TaxonName`
+- preview-first CSV and workbook imports
+- resolver-backed taxon preview with lineage payloads
+- skip-and-report handling for taxon rows that still require review
+- lineage-aware browser filters for taxa and findings
+- lineage-aware qualitative graph with branch filtering and rank rollups
+
+Current priority:
+
+- keep the main curation/import/graph path reliable
+- add only targeted stabilization where the prototype is already exercising real complexity
+
 ## Browser scope
 
 The browser should support:

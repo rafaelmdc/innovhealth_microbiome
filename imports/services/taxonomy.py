@@ -134,6 +134,22 @@ def _lineage_payload_from_taxonbridge(lineage):
     return payload
 
 
+def _lineage_payload_from_local_taxon(taxon):
+    lineage = (
+        TaxonClosure.objects.filter(descendant=taxon)
+        .select_related('ancestor')
+        .order_by('-depth')
+    )
+    return [
+        {
+            'ncbi_taxonomy_id': path.ancestor.ncbi_taxonomy_id,
+            'scientific_name': path.ancestor.scientific_name,
+            'rank': path.ancestor.rank,
+        }
+        for path in lineage
+    ]
+
+
 def _provided_name_matches_taxid(scientific_name, ncbi_taxonomy_id, rank=''):
     """Return whether the provided name cleanly resolves back to the same taxid."""
     if not scientific_name:
@@ -198,16 +214,27 @@ def build_taxon_preview_payload(*, scientific_name, ncbi_taxonomy_id=None, rank=
         canonical_rank = leaf.get('rank', '') or rank
         canonical_taxid = leaf.get('ncbi_taxonomy_id')
     else:
-        payload = [
-            {
-                'ncbi_taxonomy_id': ncbi_taxonomy_id,
-                'scientific_name': scientific_name,
-                'rank': rank,
-            }
-        ]
-        canonical_name = scientific_name
-        canonical_rank = rank
-        canonical_taxid = ncbi_taxonomy_id
+        local_taxon = resolve_taxon(scientific_name, ncbi_taxonomy_id)
+        if local_taxon:
+            payload = _lineage_payload_from_local_taxon(local_taxon)
+            canonical_name = local_taxon.scientific_name
+            canonical_rank = rank or local_taxon.rank
+            canonical_taxid = local_taxon.ncbi_taxonomy_id
+            resolution_status = 'resolved_local_taxon'
+            resolution_message = 'Resolved from existing local taxonomy'
+            review_required = False
+            resolver_source = 'local_fallback'
+        else:
+            payload = [
+                {
+                    'ncbi_taxonomy_id': ncbi_taxonomy_id,
+                    'scientific_name': scientific_name,
+                    'rank': rank,
+                }
+            ]
+            canonical_name = scientific_name
+            canonical_rank = rank
+            canonical_taxid = ncbi_taxonomy_id
 
     effective_aliases = [name for name in alias_names if name and name.lower() != (canonical_name or '').lower()]
     lineage_summary = ' > '.join(node['scientific_name'] for node in payload if node.get('scientific_name'))
