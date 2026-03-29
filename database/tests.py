@@ -171,6 +171,67 @@ class BrowserViewTests(TestCase):
         self.assertContains(response, 'Case')
         self.assertNotContains(response, 'Control')
 
+    def test_comparison_list_filters_supporting_comparisons(self):
+        branch = Taxon.objects.create(scientific_name='Faecalibacterium', rank='genus')
+        self._attach_taxon_to_branch(branch, self.taxon)
+
+        disease_group_b = Group.objects.create(
+            study=self.study_a,
+            name='Case B',
+            condition='Disease',
+        )
+        disease_reference_b = Group.objects.create(study=self.study_a, name='Reference B')
+        comparison_other_direction = Comparison.objects.create(
+            study=self.study_a,
+            group_a=disease_group_b,
+            group_b=disease_reference_b,
+            label='Case B vs reference',
+        )
+        QualitativeFinding.objects.create(
+            comparison=comparison_other_direction,
+            taxon=self.taxon,
+            direction=QualitativeFinding.Direction.DEPLETED,
+            source='Table 4',
+        )
+
+        outside_taxon = Taxon.objects.create(
+            scientific_name='Bacteroides fragilis',
+            rank='species',
+        )
+        TaxonClosure.objects.create(ancestor=outside_taxon, descendant=outside_taxon, depth=0)
+        disease_group_c = Group.objects.create(
+            study=self.study_a,
+            name='Case C',
+            condition='Disease',
+        )
+        disease_reference_c = Group.objects.create(study=self.study_a, name='Reference C')
+        comparison_other_taxon = Comparison.objects.create(
+            study=self.study_a,
+            group_a=disease_group_c,
+            group_b=disease_reference_c,
+            label='Case C vs reference',
+        )
+        QualitativeFinding.objects.create(
+            comparison=comparison_other_taxon,
+            taxon=outside_taxon,
+            direction=QualitativeFinding.Direction.ENRICHED,
+            source='Table 5',
+        )
+
+        response = self.client.get(
+            reverse('database:comparison-list'),
+            {
+                'disease_condition': 'Disease',
+                'taxon_branch': branch.pk,
+                'finding_direction': 'enriched',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Case vs reference')
+        self.assertNotContains(response, 'Case B vs reference')
+        self.assertNotContains(response, 'Case C vs reference')
+
     def test_taxon_list_filters_by_rank(self):
         genus_taxon = Taxon.objects.create(
             scientific_name='Bacteroides',
@@ -204,6 +265,63 @@ class BrowserViewTests(TestCase):
         self.assertEqual(
             [finding.taxon.scientific_name for finding in response.context['findings']],
             ['Faecalibacterium prausnitzii'],
+        )
+
+    def test_qualitative_finding_list_filters_supporting_findings(self):
+        branch = Taxon.objects.create(scientific_name='Faecalibacterium', rank='genus')
+        self._attach_taxon_to_branch(branch, self.taxon)
+
+        disease_reference_b = Group.objects.create(study=self.study_a, name='Reference B')
+        comparison_other_direction = Comparison.objects.create(
+            study=self.study_a,
+            group_a=self.group_a,
+            group_b=disease_reference_b,
+            label='Case vs reference B',
+        )
+        QualitativeFinding.objects.create(
+            comparison=comparison_other_direction,
+            taxon=self.taxon,
+            direction=QualitativeFinding.Direction.DEPLETED,
+            source='Table 4',
+        )
+
+        outside_taxon = Taxon.objects.create(
+            scientific_name='Bacteroides fragilis',
+            rank='species',
+        )
+        TaxonClosure.objects.create(ancestor=outside_taxon, descendant=outside_taxon, depth=0)
+        disease_reference_c = Group.objects.create(study=self.study_a, name='Reference C')
+        comparison_other_taxon = Comparison.objects.create(
+            study=self.study_a,
+            group_a=self.group_a,
+            group_b=disease_reference_c,
+            label='Case vs reference C',
+        )
+        QualitativeFinding.objects.create(
+            comparison=comparison_other_taxon,
+            taxon=outside_taxon,
+            direction=QualitativeFinding.Direction.ENRICHED,
+            source='Table 5',
+        )
+
+        response = self.client.get(
+            reverse('database:qualitativefinding-list'),
+            {
+                'disease_condition': 'Disease',
+                'branch': branch.pk,
+                'finding_direction': 'enriched',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['page_obj'].paginator.count, 1)
+        self.assertEqual(
+            [finding.taxon.scientific_name for finding in response.context['findings']],
+            ['Faecalibacterium prausnitzii'],
+        )
+        self.assertEqual(
+            [finding.comparison.label for finding in response.context['findings']],
+            ['Case vs reference'],
         )
 
     def test_quantitative_finding_list_filters_by_value_type(self):

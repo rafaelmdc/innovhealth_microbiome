@@ -1,82 +1,73 @@
-# Graph Design
+# Graph Overview
 
-## Purpose
+This project currently exposes two server-rendered graph views built from curated `QualitativeFinding` data:
 
-The graph view represents qualitative microbiome findings derived from curated `QualitativeFinding` records.
+- `Disease Network` at `/graph/disease/`
+- `Co-abundance Taxon Network` at `/graph/co-abundance/`
 
-Its purpose is to let users visually explore:
+`QuantitativeFinding` remains supporting evidence for the browser and future analysis work. It is not the primary edge source for either current graph.
 
-- which taxa are reported as enriched for a disease
-- which taxa are reported as depleted for a disease
-- how many supporting findings exist for each disease-taxon connection
-- how those findings change when taxa are rolled up to genus, family, order, class, or phylum
-- how evidence changes inside one selected taxonomic branch
+## Shared architecture
 
-## Source data
+Both graph pages follow the same high-level flow:
 
-Primary source model:
+1. `core.views` loads filtered `QualitativeFinding` rows with the required `Comparison`, `Group`, `Study`, and `Taxon` joins.
+2. `core.graph_payloads` converts those rows into JSON-ready node and edge payloads.
+3. The payload is embedded in the template with `json_script`.
+4. The page renders the graph with either Cytoscape or ECharts, selected by the user.
 
-- `QualitativeFinding`
+The graph layer is intentionally derived at request time. There are no stored graph tables or background graph materialization jobs in the current implementation.
 
-Supporting models:
+## Shared controls
 
-- `Comparison`
-- `Group`
-- `Study`
-- `Taxon`
-
-## Graph semantics
-
-Current graph controls:
+Both graph pages support:
 
 - study filter
-- direction filter
 - disease text query
 - taxon text query
 - taxonomic branch filter
 - grouping rank selector:
   - `leaf`
+  - `species`
   - `genus`
   - `family`
   - `order`
   - `class`
   - `phylum`
+- renderer selector:
+  - `cytoscape`
+  - `echarts`
 
-### Node meaning
+Both pages also expose per-engine layout controls. Cytoscape and ECharts use different parameter sets and defaults, so the visible sliders change when the engine changes.
 
-- one node type represents a disease-like target condition derived from `Comparison.group_a`
-- taxon nodes are split by directional role:
-  - enriched taxa appear in the left column
-  - depleted taxa appear in the right column
-  - the same taxon label may appear on both sides when evidence exists in both directions
-- when grouping rank is not `leaf`, one taxon node represents the nearest ancestor at the selected rank for one or more leaf findings
+## Disease graph
 
-### Edge meaning
+The disease graph is a comparison-centered qualitative network.
 
-An edge represents one or more qualitative findings linking a taxon role node to a disease node.
+- diseases are derived from `Comparison.group_a.condition`, falling back to `Comparison.group_a.name`
+- enriched taxa are rendered as one taxon role column
+- depleted taxa are rendered as a separate taxon role column
+- edges aggregate leaf-level findings into the selected grouping rank
 
-Edges are aggregated at query time from leaf-level `QualitativeFinding` records.
+Canonical documentation:
 
-### Edge attributes
+- [Disease Graph](disease_graph.md)
 
-- dominant direction
-- number of supporting findings
-- number of contributing leaf taxa
-- number of unique sources
-- contributing comparison labels
+## Co-abundance graph
 
-### Rollup behavior
+The co-abundance graph is a derived taxon-pair pattern view.
 
-- leaf findings stay stored at the reported `Taxon`
-- graph grouping maps each finding leaf taxon to its nearest ancestor at the selected rank
-- if no ancestor exists at the selected rank, that finding is omitted from the grouped graph
-- the UI reports how many findings were omitted for that reason
+- pairs are generated from findings that appear in the same `Comparison`
+- qualitative directions are normalized into positive vs negative buckets
+- pair support is tracked as `same_direction`, `opposite_direction`, or `mixed`
+- edges are aggregated across comparisons and optionally filtered by minimum support
 
-## Notes
+Canonical documentation:
 
-- `QuantitativeFinding` is supporting evidence, not the primary graph edge type.
-- The old organism-organism `RelativeAssociation` graph has been removed.
-- The current web layout is intentionally columnar:
-  - left: enriched taxa
-  - center: diseases
-  - right: depleted taxa
+- [Co-abundance Graph](co_abundance_graph.md)
+
+## Shared caveats
+
+- Both views are exploratory and should not be presented as causal or mechanistic evidence.
+- Rank rollup can omit findings when no ancestor exists at the selected rank. The UI reports those skipped counts.
+- The browser remains the source of truth for row-level inspection. The graph pages are derived summaries with context-menu shortcuts into the underlying browser views.

@@ -45,7 +45,7 @@ DISEASE_LAYOUT_CONTROL_SPECS = {
             'label': 'Edge length',
             'default': 220.0,
             'minimum': 80.0,
-            'maximum': 420.0,
+            'maximum': 620.0,
             'step': 10.0,
         },
         {

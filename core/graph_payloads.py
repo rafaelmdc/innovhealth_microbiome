@@ -494,6 +494,7 @@ def build_disease_graph(findings, *, grouping_rank='leaf'):
                     'id': f"{edge['source']}-{edge['target']}",
                     'source': edge['source'],
                     'target': edge['target'],
+                    'source_taxon_pk': source_node['taxon_pk'],
                     'source_label': source_node['label'],
                     'target_label': target_node['label'],
                     'column': edge['column'],

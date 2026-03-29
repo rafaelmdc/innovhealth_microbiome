@@ -240,13 +240,51 @@ class ComparisonListView(BrowserListView):
 
     def apply_filters(self, queryset):
         study_id = self.request.GET.get('study', '').strip()
+        disease_condition = self.request.GET.get('disease_condition', '').strip()
+        taxon_branch = self.request.GET.get('taxon_branch', '').strip()
+        finding_direction = self.request.GET.get('finding_direction', '').strip()
+
         if study_id:
             queryset = queryset.filter(study_id=study_id)
+        if disease_condition:
+            queryset = queryset.filter(
+                Q(group_a__condition__icontains=disease_condition)
+                | Q(group_a__name__icontains=disease_condition)
+                | Q(label__icontains=disease_condition)
+            )
+
+        if taxon_branch or finding_direction:
+            supporting_findings = QualitativeFinding.objects.all()
+            if taxon_branch:
+                supporting_findings = supporting_findings.filter(
+                    taxon__closure_ancestors__ancestor_id=taxon_branch,
+                )
+            if finding_direction == 'enriched':
+                supporting_findings = supporting_findings.filter(
+                    direction__in=(
+                        QualitativeFinding.Direction.ENRICHED,
+                        QualitativeFinding.Direction.INCREASED,
+                    ),
+                )
+            elif finding_direction == 'depleted':
+                supporting_findings = supporting_findings.filter(
+                    direction__in=(
+                        QualitativeFinding.Direction.DEPLETED,
+                        QualitativeFinding.Direction.DECREASED,
+                    ),
+                )
+            queryset = queryset.filter(pk__in=supporting_findings.values('comparison_id'))
+
+        if disease_condition or taxon_branch or finding_direction:
+            queryset = queryset.distinct()
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['current_study'] = self.request.GET.get('study', '').strip()
+        context['current_disease_condition'] = self.request.GET.get('disease_condition', '').strip()
+        context['current_taxon_branch'] = self.request.GET.get('taxon_branch', '').strip()
+        context['current_finding_direction'] = self.request.GET.get('finding_direction', '').strip()
         context['studies'] = Study.objects.order_by('title')
         return context
 
@@ -431,14 +469,38 @@ class QualitativeFindingListView(BrowserListView):
         direction = self.request.GET.get('direction', '').strip()
         taxon_id = self.request.GET.get('taxon', '').strip()
         branch_id = self.request.GET.get('branch', '').strip()
+        disease_condition = self.request.GET.get('disease_condition', '').strip()
+        finding_direction = self.request.GET.get('finding_direction', '').strip()
         if study_id:
             queryset = queryset.filter(comparison__study_id=study_id)
         if direction:
             queryset = queryset.filter(direction=direction)
+        if disease_condition:
+            queryset = queryset.filter(
+                Q(comparison__group_a__condition__icontains=disease_condition)
+                | Q(comparison__group_a__name__icontains=disease_condition)
+                | Q(comparison__label__icontains=disease_condition)
+            )
         if taxon_id:
             queryset = queryset.filter(taxon_id=taxon_id)
         if branch_id:
             queryset = queryset.filter(taxon__closure_ancestors__ancestor_id=branch_id).distinct()
+        if finding_direction == 'enriched':
+            queryset = queryset.filter(
+                direction__in=(
+                    QualitativeFinding.Direction.ENRICHED,
+                    QualitativeFinding.Direction.INCREASED,
+                ),
+            )
+        elif finding_direction == 'depleted':
+            queryset = queryset.filter(
+                direction__in=(
+                    QualitativeFinding.Direction.DEPLETED,
+                    QualitativeFinding.Direction.DECREASED,
+                ),
+            )
+        if disease_condition or branch_id or finding_direction:
+            queryset = queryset.distinct()
         return queryset
 
     def get_context_data(self, **kwargs):
@@ -447,6 +509,8 @@ class QualitativeFindingListView(BrowserListView):
         context['current_direction'] = self.request.GET.get('direction', '').strip()
         context['current_taxon'] = self.request.GET.get('taxon', '').strip()
         context['current_branch'] = self.request.GET.get('branch', '').strip()
+        context['current_disease_condition'] = self.request.GET.get('disease_condition', '').strip()
+        context['current_finding_direction'] = self.request.GET.get('finding_direction', '').strip()
         context['studies'] = Study.objects.order_by('title')
         context['direction_choices'] = QualitativeFinding.Direction.choices
         context['taxa'] = Taxon.objects.order_by('scientific_name')[:200]
