@@ -34,6 +34,14 @@
       </select>
     </div>
     <div class="col-md-2">
+      <label class="form-label" for="id_engine">Engine</label>
+      <select class="form-select" id="id_engine" name="engine">
+        {% for value, label in engine_choices %}
+          <option value="{{ value }}" {% if current_engine == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
       <label class="form-label" for="id_direction">Direction</label>
       <select class="form-select" id="id_direction" name="direction">
         <option value="">All directions</option>
@@ -42,7 +50,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-2">
+    <div class="col-md-3">
       <label class="form-label" for="id_branch">Branch</label>
       <select class="form-select" id="id_branch" name="branch">
         <option value="">All branches</option>
@@ -51,18 +59,18 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-3">
+    <div class="col-md-6">
       <label class="form-label" for="id_disease">Disease query</label>
       <input class="form-control" id="id_disease" type="text" name="disease" value="{{ current_disease }}" placeholder="Condition or target group">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-6">
       <label class="form-label" for="id_taxon">Taxon query</label>
       <input class="form-control" id="id_taxon" type="text" name="taxon" value="{{ current_taxon }}" placeholder="Scientific name or rank">
     </div>
   </div>
   <div class="mt-3 d-flex gap-2">
     <button class="btn btn-primary" type="submit">Apply</button>
-    <a class="btn btn-outline-secondary" href="{% url 'core:graph' %}">Reset</a>
+    <a class="btn btn-outline-secondary" href="{% url 'core:graph' %}?engine={{ current_engine }}">Reset</a>
   </div>
 </form>
 
@@ -114,7 +122,7 @@
         <div>
           <h2 class="h5 mb-1">Interactive Network</h2>
           <p class="text-secondary mb-0">
-            Grouped at the <strong>{{ current_group_rank }}</strong> level{% if current_branch_taxon %} within the <strong>{{ current_branch_taxon.scientific_name }}</strong> branch{% endif %}. Click any disease or taxon to isolate its local neighborhood.
+            Grouped at the <strong>{{ current_group_rank }}</strong> level{% if current_branch_taxon %} within the <strong>{{ current_branch_taxon.scientific_name }}</strong> branch{% endif %}. Switch engines explicitly to compare fixed-position and alternative rendering behavior.
           </p>
         </div>
         <button class="btn btn-outline-secondary btn-sm align-self-start align-self-lg-auto" type="button" id="graph-reset-focus">
@@ -125,10 +133,7 @@
         <div class="graph-axis graph-axis-left">Enriched {{ current_group_rank }}</div>
         <div class="graph-axis graph-axis-center">Diseases</div>
         <div class="graph-axis graph-axis-right">Depleted {{ current_group_rank }}</div>
-        <div
-          id="graph-canvas"
-          style="height: {{ graph_data.summary.layout_height }}px; width: {{ graph_data.summary.layout_width }}px;"
-        ></div>
+        <div id="graph-canvas" style="height: {{ graph_data.summary.layout_height }}px; width: {{ graph_data.summary.layout_width }}px;"></div>
       </div>
     </div>
   </div>
@@ -174,8 +179,87 @@
 {% endif %}
 
 {{ graph_data|json_script:"graph-data" }}
+{% if current_engine == 'echarts' %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+{% else %}
 <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+{% endif %}
 {% block extra_js %}
+{% if current_engine == 'echarts' %}
+<script>
+  const graphElement = document.getElementById('graph-canvas');
+  if (graphElement) {
+    const graphData = JSON.parse(document.getElementById('graph-data').textContent);
+    const chart = echarts.init(graphElement);
+    const nodes = graphData.nodes.map((node) => {
+      const data = node.data;
+      const isDisease = data.node_type === 'disease';
+      return {
+        id: data.id,
+        name: data.label,
+        x: node.position.x,
+        y: node.position.y,
+        draggable: true,
+        symbolSize: isDisease ? Math.max(44, Math.min(74, 40 + (data.degree * 6))) : Math.max(18, Math.min(34, 16 + (data.degree * 2))),
+        itemStyle: {
+          color: isDisease ? '#495057' : (data.column === 'enriched' ? '#dc3545' : '#0d6efd'),
+          borderColor: '#f8fafc',
+          borderWidth: 2,
+        },
+        label: {
+          show: true,
+          color: '#0f1720',
+          backgroundColor: 'rgba(255,255,255,0.94)',
+          padding: [4, 6],
+          borderRadius: 6,
+          fontSize: isDisease ? 12 : 11,
+          fontWeight: isDisease ? 700 : 600,
+          width: isDisease ? 130 : 120,
+          overflow: 'break',
+        },
+      };
+    });
+    const links = graphData.edges.map((edge) => ({
+      source: edge.data.source,
+      target: edge.data.target,
+      value: edge.data.finding_count,
+      lineStyle: {
+        color: edge.data.column === 'enriched' ? '#dc3545' : '#0d6efd',
+        width: Math.max(1.5, Math.min(6, edge.data.finding_count)),
+        opacity: 0.6,
+      },
+      symbol: ['none', 'arrow'],
+      symbolSize: 8,
+    }));
+    const option = {
+      animation: false,
+      tooltip: { trigger: 'item' },
+      series: [
+        {
+          type: 'graph',
+          layout: 'none',
+          roam: true,
+          data: nodes,
+          links,
+          emphasis: {
+            focus: 'adjacency',
+            lineStyle: {
+              width: 4,
+              opacity: 0.95,
+            },
+          },
+        }
+      ]
+    };
+    chart.setOption(option);
+    window.addEventListener('resize', () => chart.resize());
+    const resetButton = document.getElementById('graph-reset-focus');
+    if (resetButton) {
+      resetButton.addEventListener('click', () => chart.dispatchAction({ type: 'downplay', seriesIndex: 0 }));
+    }
+  }
+</script>
+{% else %}
 <script>
   const graphElement = document.getElementById('graph-canvas');
   if (graphElement) {
@@ -336,5 +420,6 @@
     }
   }
 </script>
+{% endif %}
 {% endblock %}
 {% endblock %}

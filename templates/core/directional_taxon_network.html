@@ -34,6 +34,14 @@
       </select>
     </div>
     <div class="col-md-2">
+      <label class="form-label" for="id_engine">Engine</label>
+      <select class="form-select" id="id_engine" name="engine">
+        {% for value, label in engine_choices %}
+          <option value="{{ value }}" {% if current_engine == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2">
       <label class="form-label" for="id_pattern">Pattern</label>
       <select class="form-select" id="id_pattern" name="pattern">
         {% for value, label in pattern_choices %}
@@ -41,11 +49,11 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md-2">
+    <div class="col-md-3">
       <label class="form-label" for="id_min_support">Minimum support</label>
       <input class="form-control" id="id_min_support" type="number" name="min_support" min="1" value="{{ current_min_support }}">
     </div>
-    <div class="col-md-3">
+    <div class="col-md-6">
       <label class="form-label" for="id_branch">Branch</label>
       <select class="form-select" id="id_branch" name="branch">
         <option value="">All branches</option>
@@ -63,9 +71,30 @@
       <input class="form-control" id="id_taxon" type="text" name="taxon" value="{{ current_taxon }}" placeholder="Scientific name or rank">
     </div>
   </div>
+  <div class="row g-3 mt-1">
+    {% for control in active_layout_controls %}
+      <div class="col-md-4">
+        <label class="form-label d-flex justify-content-between align-items-center" for="id_{{ control.name }}">
+          <span>{{ control.label }}</span>
+          <span class="text-secondary small" data-range-value-for="{{ control.name }}">{{ control.value }}</span>
+        </label>
+        <input
+          class="form-range"
+          id="id_{{ control.name }}"
+          type="range"
+          name="{{ control.name }}"
+          min="{{ control.minimum }}"
+          max="{{ control.maximum }}"
+          step="{{ control.step }}"
+          value="{{ control.value }}"
+          data-range-input
+        >
+      </div>
+    {% endfor %}
+  </div>
   <div class="mt-3 d-flex gap-2">
     <button class="btn btn-primary" type="submit">Apply</button>
-    <a class="btn btn-outline-secondary" href="{% url 'core:directional-taxon-network' %}">Reset</a>
+    <a class="btn btn-outline-secondary" href="{% url 'core:directional-taxon-network' %}?engine={{ current_engine }}">Reset</a>
   </div>
 </form>
 
@@ -144,7 +173,7 @@
         <div>
           <h2 class="h5 mb-1">Interactive Network</h2>
           <p class="text-secondary mb-0">
-            Grouped at the <strong>{{ current_group_rank }}</strong> level{% if current_branch_taxon %} within the <strong>{{ current_branch_taxon.scientific_name }}</strong> branch{% endif %}. Edge colors summarize repeated same-direction, opposite-direction, or mixed comparison-local patterns. Opposite-direction edges render in red, and symmetric arrowheads show the pair relationship without implying causality.
+            Grouped at the <strong>{{ current_group_rank }}</strong> level{% if current_branch_taxon %} within the <strong>{{ current_branch_taxon.scientific_name }}</strong> branch{% endif %}. Opposite-direction edges render in red, and the chosen engine is explicit so users can compare layouts directly.
           </p>
         </div>
         <button class="btn btn-outline-secondary btn-sm align-self-start align-self-lg-auto" type="button" id="graph-reset-focus">
@@ -204,13 +233,106 @@
 </div>
 
 {{ graph_data|json_script:"graph-data" }}
+{% if current_engine == 'echarts' %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+{% else %}
 <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+{% endif %}
 {% block extra_js %}
+{% if current_engine == 'echarts' %}
+<script>
+  const graphElement = document.getElementById('graph-canvas');
+  if (graphElement) {
+    const graphData = JSON.parse(document.getElementById('graph-data').textContent);
+    const chart = echarts.init(graphElement);
+    const echartsRepulsion = {{ layout_settings.echarts_repulsion }};
+    const echartsEdgeLength = {{ layout_settings.echarts_edge_length }};
+    const echartsGravity = {{ layout_settings.echarts_gravity }};
+    const nodes = graphData.nodes.map((node) => ({
+      id: node.data.id,
+      name: node.data.label,
+      value: node.data.degree,
+      draggable: true,
+      symbolSize: Math.max(16, Math.min(30, 16 + (node.data.degree * 2))),
+      itemStyle: {
+        color: '#0f766e',
+        borderColor: '#f8fafc',
+        borderWidth: 2,
+      },
+      label: {
+        show: false,
+      },
+    }));
+    const links = graphData.edges.map((edge) => ({
+      source: edge.data.source,
+      target: edge.data.target,
+      value: edge.data.total_support,
+      lineStyle: {
+        color:
+          edge.data.dominant_pattern === 'same_direction'
+            ? '#0f766e'
+            : edge.data.dominant_pattern === 'opposite_direction'
+              ? '#dc3545'
+              : '#64748b',
+        type: edge.data.dominant_pattern === 'mixed' ? 'dashed' : 'solid',
+        width: Math.max(1.6, Math.min(6, edge.data.total_support)),
+        opacity: 0.66,
+      },
+      symbol: ['arrow', 'arrow'],
+      symbolSize: 8,
+    }));
+    const option = {
+      animation: false,
+      tooltip: { trigger: 'item' },
+      series: [
+        {
+          type: 'graph',
+          layout: 'force',
+          roam: true,
+          draggable: true,
+          data: nodes,
+          links,
+          force: {
+            repulsion: echartsRepulsion,
+            edgeLength: [Math.round(echartsEdgeLength * 0.7), Math.round(echartsEdgeLength * 1.3)],
+            gravity: echartsGravity,
+          },
+          emphasis: {
+            focus: 'adjacency',
+            label: {
+              show: true,
+              color: '#0f1720',
+              backgroundColor: 'rgba(255,255,255,0.94)',
+              padding: [4, 6],
+              borderRadius: 6,
+              fontSize: 11,
+              fontWeight: 700,
+            },
+            lineStyle: {
+              width: 4,
+              opacity: 0.95,
+            },
+          },
+        }
+      ]
+    };
+    chart.setOption(option);
+    window.addEventListener('resize', () => chart.resize());
+    const resetButton = document.getElementById('graph-reset-focus');
+    if (resetButton) {
+      resetButton.addEventListener('click', () => chart.dispatchAction({ type: 'downplay', seriesIndex: 0 }));
+    }
+  }
+</script>
+{% else %}
 <script>
   const graphElement = document.getElementById('graph-canvas');
   if (graphElement) {
     const graphData = JSON.parse(document.getElementById('graph-data').textContent);
     const elements = [...graphData.nodes, ...graphData.edges];
+    const cytoscapeRepulsionScale = {{ layout_settings.cytoscape_repulsion_scale }};
+    const cytoscapeEdgeLengthScale = {{ layout_settings.cytoscape_edge_length_scale }};
+    const cytoscapeGravity = {{ layout_settings.cytoscape_gravity }};
 
     const cy = cytoscape({
       container: graphElement,
@@ -394,10 +516,14 @@
         animate: false,
         randomize: true,
         padding: 40,
-        nodeRepulsion: Math.max(260000, nodeCount * 26000, Math.round(220000 + (density * 380000))),
-        idealEdgeLength: Math.max(150, Math.round(170 + (density * 120) - Math.min(nodeCount, 24))),
+        nodeRepulsion: Math.round(
+          Math.max(260000, nodeCount * 26000, Math.round(220000 + (density * 380000))) * cytoscapeRepulsionScale
+        ),
+        idealEdgeLength: Math.round(
+          Math.max(150, Math.round(170 + (density * 120) - Math.min(nodeCount, 24))) * cytoscapeEdgeLengthScale
+        ),
         edgeElasticity: 90,
-        gravity: 0.1,
+        gravity: cytoscapeGravity,
         numIter: 2200,
         initialTemp: 140,
       }).run();
@@ -423,7 +549,7 @@
 
       spreadDenseComponent(
         component,
-        Math.round(38 + (density * 52) + Math.min(nodeCount, 12)),
+        Math.round((38 + (density * 52) + Math.min(nodeCount, 12)) * cytoscapeEdgeLengthScale),
         Math.min(28, 12 + nodeCount),
       );
 
@@ -478,7 +604,19 @@
     if (resetButton) {
       resetButton.addEventListener('click', resetFocus);
     }
+
   }
+</script>
+{% endif %}
+<script>
+  document.querySelectorAll('[data-range-input]').forEach((input) => {
+    input.addEventListener('input', (event) => {
+      const valueTarget = document.querySelector(`[data-range-value-for="${event.target.name}"]`);
+      if (valueTarget) {
+        valueTarget.textContent = event.target.value;
+      }
+    });
+  });
 </script>
 {% endblock %}
 {% endblock %}

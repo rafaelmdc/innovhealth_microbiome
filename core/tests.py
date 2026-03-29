@@ -212,6 +212,13 @@ class GraphViewTests(TestCase):
         self.assertEqual(response.context['graph_data']['summary']['skipped_rollup_count'], 3)
         self.assertContains(response, '3 findings omitted because no ancestor exists at the selected rank.')
 
+    def test_graph_page_accepts_explicit_engine_selection(self):
+        response = self.client.get(reverse('core:graph'), {'engine': 'echarts'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['current_engine'], 'echarts')
+        self.assertContains(response, 'echarts.min.js')
+
 
 class DirectionalTaxonNetworkTests(TestCase):
     def setUp(self):
@@ -352,6 +359,45 @@ class DirectionalTaxonNetworkTests(TestCase):
         self.assertIn('Blautia', labels)
         self.assertIn('Roseburia', labels)
         self.assertIn('Bacteroides', labels)
+
+    def test_directional_taxon_network_page_accepts_explicit_engine_selection(self):
+        response = self.client.get(reverse('core:directional-taxon-network'), {'engine': 'echarts'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['current_engine'], 'echarts')
+        self.assertContains(response, 'echarts.min.js')
+        self.assertContains(response, 'name="echarts_repulsion"')
+        self.assertContains(response, 'name="echarts_edge_length"')
+        self.assertContains(response, 'name="echarts_gravity"')
+        self.assertNotContains(response, 'name="cytoscape_repulsion_scale"')
+
+    def test_directional_taxon_network_page_shows_cytoscape_layout_controls_by_default(self):
+        response = self.client.get(reverse('core:directional-taxon-network'))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="cytoscape_repulsion_scale"')
+        self.assertContains(response, 'name="cytoscape_edge_length_scale"')
+        self.assertContains(response, 'name="cytoscape_gravity"')
+        self.assertNotContains(response, 'name="echarts_repulsion"')
+
+    def test_directional_taxon_network_page_preserves_custom_layout_values(self):
+        response = self.client.get(
+            reverse('core:directional-taxon-network'),
+            {
+                'engine': 'echarts',
+                'echarts_repulsion': '1450',
+                'echarts_edge_length': '300',
+                'echarts_gravity': '0.04',
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['layout_settings']['echarts_repulsion'], 1450.0)
+        self.assertEqual(response.context['layout_settings']['echarts_edge_length'], 300.0)
+        self.assertEqual(response.context['layout_settings']['echarts_gravity'], 0.04)
+        self.assertContains(response, 'value="1450.0"')
+        self.assertContains(response, 'value="300.0"')
+        self.assertContains(response, 'value="0.04"')
 
 
 class StaffHomeViewTests(TestCase):

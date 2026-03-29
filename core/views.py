@@ -7,7 +7,13 @@ from django.views.generic import TemplateView
 
 from database.models import Comparison, Group, QualitativeFinding, QuantitativeFinding, Study, Taxon
 
-from .graph import GRAPH_GROUPING_CHOICES, build_disease_graph, build_directional_taxon_network
+from .graph_payloads import GRAPH_GROUPING_CHOICES, build_disease_graph, build_directional_taxon_network
+from .graph_renderers import (
+    DIRECTIONAL_LAYOUT_CONTROL_SPECS,
+    GRAPH_ENGINE_CHOICES,
+    build_directional_layout_settings,
+    normalize_graph_engine,
+)
 from .model_diagram import MODEL_DIAGRAM_CONTENT_TYPES, render_model_diagram, render_model_diagram_svg
 
 
@@ -155,7 +161,9 @@ class GraphView(TemplateView):
         context['studies'] = Study.objects.order_by('title')
         context['direction_choices'] = QualitativeFinding.Direction.choices
         context['grouping_rank_choices'] = GRAPH_GROUPING_CHOICES
+        context['engine_choices'] = GRAPH_ENGINE_CHOICES
         context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
+        context['current_engine'] = normalize_graph_engine(self.request.GET.get('engine', '').strip() or 'cytoscape')
         context['current_study'] = self.request.GET.get('study', '').strip()
         context['current_direction'] = self.request.GET.get('direction', '').strip()
         context['current_disease'] = self.request.GET.get('disease', '').strip() or self.request.GET.get('comparison', '').strip()
@@ -223,6 +231,8 @@ class DirectionalTaxonNetworkView(TemplateView):
         branch_id = self.request.GET.get('branch', '').strip()
         minimum_support = self.get_minimum_support()
         pattern_filter = self.get_pattern_filter()
+        current_engine = normalize_graph_engine(self.request.GET.get('engine', '').strip() or 'cytoscape')
+        layout_settings = build_directional_layout_settings(self.request.GET)
         graph_data = build_directional_taxon_network(
             self.get_queryset(),
             grouping_rank=grouping_rank,
@@ -232,6 +242,15 @@ class DirectionalTaxonNetworkView(TemplateView):
         context['graph_data'] = graph_data
         context['studies'] = Study.objects.order_by('title')
         context['grouping_rank_choices'] = GRAPH_GROUPING_CHOICES
+        context['engine_choices'] = GRAPH_ENGINE_CHOICES
+        context['active_layout_controls'] = [
+            {
+                **spec,
+                'value': layout_settings[spec['name']],
+            }
+            for spec in DIRECTIONAL_LAYOUT_CONTROL_SPECS[current_engine]
+        ]
+        context['layout_settings'] = layout_settings
         context['branch_taxa'] = Taxon.objects.order_by('scientific_name')[:200]
         context['pattern_choices'] = (
             ('all', 'All patterns'),
@@ -239,6 +258,7 @@ class DirectionalTaxonNetworkView(TemplateView):
             ('opposite_direction', 'Opposite direction'),
             ('mixed', 'Mixed'),
         )
+        context['current_engine'] = current_engine
         context['current_study'] = self.request.GET.get('study', '').strip()
         context['current_disease'] = self.request.GET.get('disease', '').strip() or self.request.GET.get('comparison', '').strip()
         context['current_taxon'] = self.request.GET.get('taxon', '').strip()
