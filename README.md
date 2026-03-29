@@ -1,4 +1,4 @@
-# Microbiome Literature Database
+# Microbiome Interaction Network Database
 
 A Django-based database and browser for curated microbiome study evidence, centered on study groups, explicit comparisons, qualitative taxon findings, quantitative taxon values, and server-rendered graph exploration.
 
