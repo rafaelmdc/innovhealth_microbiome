@@ -807,14 +807,18 @@
     });
 
     cy.on('cxttap', 'node', (event) => {
-      const browserEvent = event.originalEvent;
       const taxonPk = event.target.data('taxon_pk');
-      if (!taxonPk || !browserEvent) {
+      const renderedPosition = event.renderedPosition || event.position;
+      if (!taxonPk || !renderedPosition) {
         hideContextMenu();
         return;
       }
-      browserEvent.preventDefault();
-      showContextMenu(browserEvent.clientX, browserEvent.clientY, taxonPk);
+      const canvasBounds = graphElement.getBoundingClientRect();
+      showContextMenu(
+        canvasBounds.left + renderedPosition.x,
+        canvasBounds.top + renderedPosition.y,
+        taxonPk,
+      );
     });
 
     cy.on('zoom', updateZoomLabels);

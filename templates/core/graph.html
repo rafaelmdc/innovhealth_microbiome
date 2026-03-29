@@ -203,7 +203,7 @@
 {% endif %}
 
 <div id="graph-context-menu" class="graph-context-menu" hidden>
-  <a id="graph-context-menu-open" class="graph-context-menu-link" href="#">Open taxon entry</a>
+  <a id="graph-context-menu-open" class="graph-context-menu-link" href="#">Open entry</a>
 </div>
 
 {{ graph_data|json_script:"graph-data" }}
@@ -222,13 +222,32 @@
     const contextMenu = document.getElementById('graph-context-menu');
     const contextMenuOpenLink = document.getElementById('graph-context-menu-open');
     const taxonDetailUrlTemplate = "{% url 'database:taxon-detail' 0 %}";
+    const comparisonListUrl = "{% url 'database:comparison-list' %}";
     const echartsRepulsion = {{ layout_settings.echarts_repulsion }};
     const echartsEdgeLength = {{ layout_settings.echarts_edge_length }};
     const echartsGravity = {{ layout_settings.echarts_gravity }};
     const echartsLabelZoomThreshold = 0.72;
     let labelsVisible = true;
     let focusedNodeId = null;
-    let hoveredTaxonPk = null;
+    let hoveredNodeData = null;
+    const buildContextMenuAction = (nodeData) => {
+      if (!nodeData) {
+        return null;
+      }
+      if (nodeData.node_type === 'taxon' && nodeData.taxon_pk) {
+        return {
+          href: taxonDetailUrlTemplate.replace('/0/', `/${nodeData.taxon_pk}/`),
+          label: 'Open taxon entry',
+        };
+      }
+      if (nodeData.node_type === 'disease' && nodeData.label) {
+        return {
+          href: `${comparisonListUrl}?q=${encodeURIComponent(nodeData.label)}`,
+          label: 'Open matching comparisons',
+        };
+      }
+      return null;
+    };
     const buildFocusedNodeIds = () => {
       if (!focusedNodeId) {
         return new Set();
@@ -252,6 +271,8 @@
       return {
         id: data.id,
         name: data.label,
+        label_text: data.label,
+        node_type: data.node_type,
         taxon_pk: data.taxon_pk,
         x: node.position.x,
         y: node.position.y,
@@ -319,12 +340,14 @@
       }
       contextMenu.hidden = true;
     };
-    const showContextMenu = (clientX, clientY, taxonPk) => {
-      if (!contextMenu || !contextMenuOpenLink || !taxonPk) {
+    const showContextMenu = (clientX, clientY, nodeData) => {
+      const action = buildContextMenuAction(nodeData);
+      if (!contextMenu || !contextMenuOpenLink || !action) {
         hideContextMenu();
         return;
       }
-      contextMenuOpenLink.href = taxonDetailUrlTemplate.replace('/0/', `/${taxonPk}/`);
+      contextMenuOpenLink.href = action.href;
+      contextMenuOpenLink.textContent = action.label;
       contextMenu.hidden = false;
       contextMenu.style.left = `${clientX}px`;
       contextMenu.style.top = `${clientY}px`;
@@ -390,30 +413,30 @@
       applyChartState();
     });
     chart.on('mousemove', (params) => {
-      if (params.dataType === 'node' && params.data && params.data.taxon_pk) {
-        hoveredTaxonPk = params.data.taxon_pk;
+      if (params.dataType === 'node' && params.data) {
+        hoveredNodeData = params.data;
       } else {
-        hoveredTaxonPk = null;
+        hoveredNodeData = null;
       }
     });
     chart.on('globalout', () => {
-      hoveredTaxonPk = null;
+      hoveredNodeData = null;
     });
     graphElement.addEventListener('mousedown', (event) => {
       if (event.button !== 2) {
         return;
       }
       event.preventDefault();
-      if (hoveredTaxonPk) {
-        showContextMenu(event.clientX, event.clientY, hoveredTaxonPk);
+      if (hoveredNodeData) {
+        showContextMenu(event.clientX, event.clientY, hoveredNodeData);
       } else {
         hideContextMenu();
       }
     });
     graphElement.addEventListener('contextmenu', (event) => {
       event.preventDefault();
-      if (hoveredTaxonPk) {
-        showContextMenu(event.clientX, event.clientY, hoveredTaxonPk);
+      if (hoveredNodeData) {
+        showContextMenu(event.clientX, event.clientY, hoveredNodeData);
       } else {
         hideContextMenu();
       }
@@ -445,6 +468,7 @@
     const contextMenu = document.getElementById('graph-context-menu');
     const contextMenuOpenLink = document.getElementById('graph-context-menu-open');
     const taxonDetailUrlTemplate = "{% url 'database:taxon-detail' 0 %}";
+    const comparisonListUrl = "{% url 'database:comparison-list' %}";
     const elements = [...graphData.nodes, ...graphData.edges];
     const initialPositions = new Map(graphData.nodes.map((node) => [node.data.id, node.position]));
     const cytoscapeRepulsionScale = {{ layout_settings.cytoscape_repulsion_scale }};
@@ -621,12 +645,32 @@
       }
       contextMenu.hidden = true;
     };
-    const showContextMenu = (clientX, clientY, taxonPk) => {
-      if (!contextMenu || !contextMenuOpenLink || !taxonPk) {
+    const buildContextMenuAction = (nodeData) => {
+      if (!nodeData) {
+        return null;
+      }
+      if (nodeData.node_type === 'taxon' && nodeData.taxon_pk) {
+        return {
+          href: taxonDetailUrlTemplate.replace('/0/', `/${nodeData.taxon_pk}/`),
+          label: 'Open taxon entry',
+        };
+      }
+      if (nodeData.node_type === 'disease' && nodeData.label) {
+        return {
+          href: `${comparisonListUrl}?q=${encodeURIComponent(nodeData.label)}`,
+          label: 'Open matching comparisons',
+        };
+      }
+      return null;
+    };
+    const showContextMenu = (clientX, clientY, nodeData) => {
+      const action = buildContextMenuAction(nodeData);
+      if (!contextMenu || !contextMenuOpenLink || !action) {
         hideContextMenu();
         return;
       }
-      contextMenuOpenLink.href = taxonDetailUrlTemplate.replace('/0/', `/${taxonPk}/`);
+      contextMenuOpenLink.href = action.href;
+      contextMenuOpenLink.textContent = action.label;
       contextMenu.hidden = false;
       contextMenu.style.left = `${clientX}px`;
       contextMenu.style.top = `${clientY}px`;
@@ -661,14 +705,18 @@
     });
 
     cy.on('cxttap', 'node', (event) => {
-      const browserEvent = event.originalEvent;
-      const taxonPk = event.target.data('taxon_pk');
-      if (!taxonPk || !browserEvent) {
+      const nodeData = event.target.data();
+      const renderedPosition = event.renderedPosition || event.position;
+      if (!renderedPosition) {
         hideContextMenu();
         return;
       }
-      browserEvent.preventDefault();
-      showContextMenu(browserEvent.clientX, browserEvent.clientY, taxonPk);
+      const canvasBounds = graphElement.getBoundingClientRect();
+      showContextMenu(
+        canvasBounds.left + renderedPosition.x,
+        canvasBounds.top + renderedPosition.y,
+        nodeData,
+      );
     });
 
     const resetButton = document.getElementById('graph-reset-focus');
