@@ -115,9 +115,9 @@ class GraphView(TemplateView):
     template_name = 'core/graph.html'
 
     def get_grouping_rank(self):
-        grouping_rank = self.request.GET.get('group_rank', '').strip() or 'leaf'
+        grouping_rank = self.request.GET.get('group_rank', '').strip() or 'family'
         valid_ranks = {value for value, _label in GRAPH_GROUPING_CHOICES}
-        return grouping_rank if grouping_rank in valid_ranks else 'leaf'
+        return grouping_rank if grouping_rank in valid_ranks else 'family'
 
     def get_queryset(self):
         queryset = QualitativeFinding.objects.select_related(
@@ -190,9 +190,9 @@ class DirectionalTaxonNetworkView(TemplateView):
     template_name = 'core/directional_taxon_network.html'
 
     def get_grouping_rank(self):
-        grouping_rank = self.request.GET.get('group_rank', '').strip() or 'leaf'
+        grouping_rank = self.request.GET.get('group_rank', '').strip() or 'family'
         valid_ranks = {value for value, _label in GRAPH_GROUPING_CHOICES}
-        return grouping_rank if grouping_rank in valid_ranks else 'leaf'
+        return grouping_rank if grouping_rank in valid_ranks else 'family'
 
     def get_minimum_support(self):
         minimum_support = self.request.GET.get('min_support', '').strip() or '1'

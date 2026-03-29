@@ -3,6 +3,7 @@ from database.models import TaxonClosure
 
 GRAPH_GROUPING_CHOICES = (
     ('leaf', 'Leaf'),
+    ('species', 'Species'),
     ('genus', 'Genus'),
     ('family', 'Family'),
     ('order', 'Order'),

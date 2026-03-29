@@ -161,7 +161,7 @@ class GraphViewTests(TestCase):
                 )
 
     def test_graph_page_renders_summary(self):
-        response = self.client.get(reverse('core:disease-network'))
+        response = self.client.get(reverse('core:disease-network'), {'group_rank': 'leaf'})
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Disease Network')
@@ -174,7 +174,10 @@ class GraphViewTests(TestCase):
     def test_graph_page_filters_by_direction(self):
         response = self.client.get(
             reverse('core:disease-network'),
-            {'direction': QualitativeFinding.Direction.ENRICHED},
+            {
+                'direction': QualitativeFinding.Direction.ENRICHED,
+                'group_rank': 'leaf',
+            },
         )
 
         self.assertEqual(response.status_code, 200)
@@ -227,6 +230,8 @@ class GraphViewTests(TestCase):
         response = self.client.get(reverse('core:disease-network'))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['current_group_rank'], 'family')
+        self.assertContains(response, '<option value="species"', html=False)
         self.assertContains(response, 'name="cytoscape_repulsion_scale"')
         self.assertContains(response, 'name="cytoscape_edge_length_scale"')
         self.assertContains(response, 'name="cytoscape_gravity"')
@@ -374,7 +379,13 @@ class DirectionalTaxonNetworkTests(TestCase):
         )
 
     def test_directional_taxon_network_page_filters_by_pattern(self):
-        response = self.client.get(reverse('core:co-abundance-network'), {'pattern': 'opposite_direction'})
+        response = self.client.get(
+            reverse('core:co-abundance-network'),
+            {
+                'pattern': 'opposite_direction',
+                'group_rank': 'leaf',
+            },
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Co-abundance Taxon Network')
@@ -407,6 +418,8 @@ class DirectionalTaxonNetworkTests(TestCase):
         response = self.client.get(reverse('core:co-abundance-network'))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context['current_group_rank'], 'family')
+        self.assertContains(response, '<option value="species"', html=False)
         self.assertContains(response, 'name="cytoscape_repulsion_scale"')
         self.assertContains(response, 'name="cytoscape_edge_length_scale"')
         self.assertContains(response, 'name="cytoscape_gravity"')
