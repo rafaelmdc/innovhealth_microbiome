@@ -5,6 +5,10 @@ from django.apps import apps
 
 
 PROJECT_APP_LABELS = ('database',)
+MODEL_DIAGRAM_CONTENT_TYPES = {
+    'png': 'image/png',
+    'svg': 'image/svg+xml',
+}
 
 
 def _model_label(model):
@@ -57,15 +61,22 @@ def build_model_diagram_dot():
     return '\n'.join(lines)
 
 
-def render_model_diagram_svg():
+def render_model_diagram(output_format='svg'):
     dot_source = build_model_diagram_dot()
+    if output_format not in MODEL_DIAGRAM_CONTENT_TYPES:
+        raise ValueError(f'Unsupported diagram format: {output_format}')
+
     completed = subprocess.run(
-        ['dot', '-Tsvg'],
-        input=dot_source,
-        text=True,
+        ['dot', f'-T{output_format}'],
+        input=dot_source.encode('utf-8'),
         capture_output=True,
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError(completed.stderr.strip() or 'Graphviz failed to render the model diagram.')
+        stderr = completed.stderr.decode('utf-8', errors='replace').strip()
+        raise RuntimeError(stderr or 'Graphviz failed to render the model diagram.')
     return completed.stdout
+
+
+def render_model_diagram_svg():
+    return render_model_diagram('svg').decode('utf-8')

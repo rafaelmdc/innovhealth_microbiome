@@ -1,13 +1,14 @@
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.utils.safestring import mark_safe
+from django.views import View
 from django.views.generic import TemplateView
 
 from database.models import Comparison, Group, QualitativeFinding, QuantitativeFinding, Study, Taxon
 
 from .graph import GRAPH_GROUPING_CHOICES, build_disease_graph
-from .model_diagram import render_model_diagram_svg
+from .model_diagram import MODEL_DIAGRAM_CONTENT_TYPES, render_model_diagram, render_model_diagram_svg
 
 
 class HomeView(TemplateView):
@@ -80,6 +81,26 @@ class ModelDiagramView(LoginRequiredMixin, TemplateView):
             context['diagram_svg'] = ''
             context['diagram_error'] = str(exc)
         return context
+
+
+class ModelDiagramDownloadView(LoginRequiredMixin, View):
+    login_url = '/admin/login/'
+
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        if request.user.is_authenticated and not request.user.is_staff:
+            raise Http404()
+        return response
+
+    def get(self, request, *args, **kwargs):
+        output_format = kwargs['output_format']
+        if output_format not in MODEL_DIAGRAM_CONTENT_TYPES:
+            raise Http404()
+
+        diagram = render_model_diagram(output_format)
+        response = HttpResponse(diagram, content_type=MODEL_DIAGRAM_CONTENT_TYPES[output_format])
+        response['Content-Disposition'] = f'attachment; filename="mindb-schema.{output_format}"'
+        return response
 
 
 class GraphView(TemplateView):

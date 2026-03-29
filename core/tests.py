@@ -1,6 +1,9 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from unittest.mock import patch
+
+from core.model_diagram import render_model_diagram_svg
 
 from database.models import Comparison, Group, QualitativeFinding, QuantitativeFinding, Study, Taxon, TaxonClosure
 
@@ -253,10 +256,57 @@ class StaffHomeViewTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertIn('/admin/login/', response['Location'])
 
-    def test_model_diagram_renders_for_staff_user(self):
+    @patch('core.views.render_model_diagram_svg', return_value='<svg />')
+    def test_model_diagram_renders_for_staff_user(self, render_model_diagram_svg_mock):
         self.client.login(username='staff', password='testpass123')
 
         response = self.client.get(reverse('core:model-diagram'))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Model Diagram')
+        self.assertContains(response, reverse('core:model-diagram-download', args=['svg']))
+        self.assertContains(response, reverse('core:model-diagram-download', args=['png']))
+        render_model_diagram_svg_mock.assert_called_once_with()
+
+    @patch('core.views.render_model_diagram', return_value=b'<svg />')
+    def test_model_diagram_svg_download_renders_for_staff_user(self, render_model_diagram_mock):
+        self.client.login(username='staff', password='testpass123')
+
+        response = self.client.get(reverse('core:model-diagram-download', args=['svg']))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'image/svg+xml')
+        self.assertEqual(
+            response['Content-Disposition'],
+            'attachment; filename="mindb-schema.svg"',
+        )
+        self.assertEqual(response.content, b'<svg />')
+        render_model_diagram_mock.assert_called_once_with('svg')
+
+    @patch('core.views.render_model_diagram', return_value=b'png-bytes')
+    def test_model_diagram_png_download_renders_for_staff_user(self, render_model_diagram_mock):
+        self.client.login(username='staff', password='testpass123')
+
+        response = self.client.get(reverse('core:model-diagram-download', args=['png']))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'image/png')
+        self.assertEqual(
+            response['Content-Disposition'],
+            'attachment; filename="mindb-schema.png"',
+        )
+        self.assertEqual(response.content, b'png-bytes')
+        render_model_diagram_mock.assert_called_once_with('png')
+
+
+class ModelDiagramRendererTests(TestCase):
+    @patch('core.model_diagram.subprocess.run')
+    def test_render_model_diagram_svg_encodes_dot_input(self, subprocess_run_mock):
+        subprocess_run_mock.return_value.returncode = 0
+        subprocess_run_mock.return_value.stdout = b'<svg />'
+        subprocess_run_mock.return_value.stderr = b''
+
+        svg = render_model_diagram_svg()
+
+        self.assertEqual(svg, '<svg />')
+        self.assertIsInstance(subprocess_run_mock.call_args.kwargs['input'], bytes)
