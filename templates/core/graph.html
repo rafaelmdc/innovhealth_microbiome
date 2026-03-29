@@ -222,7 +222,7 @@
     const contextMenu = document.getElementById('graph-context-menu');
     const contextMenuOpenLink = document.getElementById('graph-context-menu-open');
     const taxonDetailUrlTemplate = "{% url 'database:taxon-detail' 0 %}";
-    const comparisonListUrl = "{% url 'database:comparison-list' %}";
+    const groupListUrl = "{% url 'database:group-list' %}";
     const echartsRepulsion = {{ layout_settings.echarts_repulsion }};
     const echartsEdgeLength = {{ layout_settings.echarts_edge_length }};
     const echartsGravity = {{ layout_settings.echarts_gravity }};
@@ -242,8 +242,8 @@
       }
       if (nodeData.node_type === 'disease' && nodeData.label) {
         return {
-          href: `${comparisonListUrl}?q=${encodeURIComponent(nodeData.label)}`,
-          label: 'Open matching comparisons',
+          href: `${groupListUrl}?condition=${encodeURIComponent(nodeData.label)}`,
+          label: 'Open matching groups',
         };
       }
       return null;
@@ -468,7 +468,7 @@
     const contextMenu = document.getElementById('graph-context-menu');
     const contextMenuOpenLink = document.getElementById('graph-context-menu-open');
     const taxonDetailUrlTemplate = "{% url 'database:taxon-detail' 0 %}";
-    const comparisonListUrl = "{% url 'database:comparison-list' %}";
+    const groupListUrl = "{% url 'database:group-list' %}";
     const elements = [...graphData.nodes, ...graphData.edges];
     const initialPositions = new Map(graphData.nodes.map((node) => [node.data.id, node.position]));
     const cytoscapeRepulsionScale = {{ layout_settings.cytoscape_repulsion_scale }};
@@ -657,8 +657,8 @@
       }
       if (nodeData.node_type === 'disease' && nodeData.label) {
         return {
-          href: `${comparisonListUrl}?q=${encodeURIComponent(nodeData.label)}`,
-          label: 'Open matching comparisons',
+          href: `${groupListUrl}?condition=${encodeURIComponent(nodeData.label)}`,
+          label: 'Open matching groups',
         };
       }
       return null;
