@@ -483,6 +483,37 @@ body {
   padding-bottom: 0.25rem;
 }
 
+.graph-context-menu[hidden] {
+  display: none;
+}
+
+.graph-context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 190px;
+  padding: 0.45rem;
+  background: rgba(255, 253, 248, 0.98);
+  border: 1px solid rgba(19, 34, 37, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 18px 48px rgba(15, 23, 32, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.graph-context-menu-link {
+  display: block;
+  padding: 0.7rem 0.85rem;
+  border-radius: 12px;
+  color: var(--site-ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.graph-context-menu-link:hover,
+.graph-context-menu-link:focus {
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--site-primary-dark);
+}
+
 .graph-axis {
   position: absolute;
   top: 0;
